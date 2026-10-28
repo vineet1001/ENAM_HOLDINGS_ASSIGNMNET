@@ -213,3 +213,4 @@ export interface SystemHealth {
   database: string;
   timestamp: string;
 }
+

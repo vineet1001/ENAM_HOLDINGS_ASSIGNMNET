@@ -104,3 +104,4 @@ To migrate to PostgreSQL:
 | `DEFAULT_VOLUME_MULTIPLIER` | `2.0` | Default unusual volume spike multiplier (x) |
 | `API_PORT` | `8000` | Backend port |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000/api` | Backend URL consumed by frontend |
+

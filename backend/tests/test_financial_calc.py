@@ -76,3 +76,4 @@ def test_net_debt():
 def test_safe_round():
     assert safe_round(12.3456, 2) == 12.35
     assert safe_round(None, 2) is None
+

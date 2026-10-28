@@ -29,7 +29,7 @@ export default function SettingsPage() {
       setLoading(true);
       const [h, m] = await Promise.all([
         api.getHealth(),
-        fetch('http://localhost:8000/api/metrics/summary').then(r => r.json()).catch(() => null),
+        fetch('/api/metrics/summary').then(r => r.json()).catch(() => null),
       ]);
       setHealth(h);
       setMetrics(m);
@@ -209,3 +209,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

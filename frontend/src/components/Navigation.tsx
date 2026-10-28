@@ -122,3 +122,4 @@ export function Navigation({ alertCount = 0 }: { alertCount?: number }) {
     </>
   );
 }
+

@@ -93,3 +93,4 @@ FINN operates as a modular monolith organized into two distinct operational flow
 3. **Primary-Source Discipline:**
    * *Decision:* Secondary news articles, blog posts, and broker opinions are excluded from pull-mode analysis.
    * *Rationale:* Investment teams require defensible, auditable primary evidence directly from company disclosures.
+

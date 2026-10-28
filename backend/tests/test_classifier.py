@@ -49,3 +49,4 @@ def test_materiality_score_lower_for_unclassified():
     old = now - timedelta(days=5)
     score, _ = compute_materiality_score("unclassified", 0.4, old, now)
     assert score < 0.4
+

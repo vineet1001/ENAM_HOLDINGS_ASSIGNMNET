@@ -124,3 +124,4 @@ python -m pytest backend/tests -v
 * **Deterministic Calculations:** QoQ/YoY percentage changes handle negative denominators consistently: `((Current - Previous) / |Previous|) * 100`.
 * **Consolidated vs Standalone Safeguard:** Never compares consolidated figures with standalone figures without explicit labeling.
 * **Transparent Stale Data:** Outdated prices or offline ingestion states are explicitly labeled rather than silently substituted with synthetic data.
+
