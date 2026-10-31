@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.company import Company
 from app.models.alert import AlertRule, AlertEvent
+from app.models.announcement import Announcement
 from app.schemas.schemas import (
-    AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse, AlertEventResponse
+    AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse, AlertEventResponse, AlertSourceSite
 )
 from app.services.alert_engine import evaluate_all_alerts
 
@@ -170,6 +171,65 @@ async def get_alert_events(
         company = await db.get(Company, event.company_id)
         rule = await db.get(AlertRule, event.alert_rule_id)
         
+        # Resolve related announcement and primary filing URL if available
+        related_ann = None
+        if event.related_announcement_id:
+            related_ann = await db.get(Announcement, event.related_announcement_id)
+        elif event.trigger_value and "announcement" in event.trigger_value:
+            # Try to resolve by category or company
+            ann_res = await db.execute(
+                select(Announcement)
+                .where(Announcement.company_id == event.company_id)
+                .order_by(Announcement.filing_date.desc())
+                .limit(1)
+            )
+            related_ann = ann_res.scalar_one_or_none()
+
+        source_url = None
+        related_category = None
+        if related_ann:
+            source_url = related_ann.source_url or related_ann.document_url
+            related_category = related_ann.category
+
+        # Build comprehensive real-time source sites & news aggregators
+        ticker = company.ticker if company else ""
+        name = company.name if company else ""
+        source_sites: list[AlertSourceSite] = []
+
+        # 1. Primary Exchange Filing
+        if source_url:
+            source_sites.append(AlertSourceSite(
+                name="Primary Exchange Filing",
+                url=source_url,
+                category="filing"
+            ))
+
+        if ticker:
+            # 2. Google News Live Search (Real-time financial breaking news feed)
+            source_sites.append(AlertSourceSite(
+                name="Live News (Google)",
+                url=f"https://news.google.com/search?q={ticker}+NSE+stock+news",
+                category="live_news"
+            ))
+            # 3. Google Finance (Live quotes, intraday volume, financial events)
+            source_sites.append(AlertSourceSite(
+                name="Google Finance",
+                url=f"https://www.google.com/finance/quote/{ticker}:NSE",
+                category="market_quote"
+            ))
+            # 4. NSE India Official Corporate Profile & Live Order Book
+            source_sites.append(AlertSourceSite(
+                name="NSE India Quote",
+                url=f"https://www.nseindia.com/get-quotes/equity?symbol={ticker}",
+                category="exchange"
+            ))
+            # 5. Moneycontrol Stock Intelligence
+            source_sites.append(AlertSourceSite(
+                name="Moneycontrol Feed",
+                url=f"https://www.google.com/search?q={ticker}+moneycontrol+stock+news",
+                category="live_news"
+            ))
+
         responses.append(AlertEventResponse(
             id=event.id,
             alert_rule_id=event.alert_rule_id,
@@ -184,7 +244,11 @@ async def get_alert_events(
             threshold_value=event.threshold_value,
             is_acknowledged=event.is_acknowledged,
             acknowledged_at=event.acknowledged_at,
-            is_demo=event.is_demo
+            is_demo=event.is_demo,
+            related_announcement_id=related_ann.id if related_ann else event.related_announcement_id,
+            related_announcement_category=related_category,
+            source_url=source_url,
+            source_sites=source_sites
         ))
     
     return {"events": responses, "total": len(responses)}

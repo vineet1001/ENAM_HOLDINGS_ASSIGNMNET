@@ -99,6 +99,12 @@ export interface AlertRule {
   created_at: string;
 }
 
+export interface AlertSourceSite {
+  name: string;
+  url: string;
+  category: string;
+}
+
 export interface AlertEvent {
   id: number;
   alert_rule_id: number;
@@ -114,6 +120,10 @@ export interface AlertEvent {
   is_acknowledged: boolean;
   acknowledged_at: string | null;
   is_demo: boolean;
+  related_announcement_id?: number | null;
+  related_announcement_category?: string | null;
+  source_url?: string | null;
+  source_sites?: AlertSourceSite[];
 }
 
 export interface QuarterlyComparisonRow {

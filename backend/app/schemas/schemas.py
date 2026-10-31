@@ -144,6 +144,11 @@ class AlertRuleResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class AlertSourceSite(BaseModel):
+    name: str
+    url: str
+    category: str = "live_news"  # filing | live_news | market_quote | exchange
+
 class AlertEventResponse(BaseModel):
     id: int
     alert_rule_id: int
@@ -159,6 +164,10 @@ class AlertEventResponse(BaseModel):
     is_acknowledged: bool
     acknowledged_at: datetime | None = None
     is_demo: bool
+    related_announcement_id: int | None = None
+    related_announcement_category: str | None = None
+    source_url: str | None = None
+    source_sites: list[AlertSourceSite] = []
 
     class Config:
         from_attributes = True
