@@ -262,6 +262,94 @@ function ResearchContent() {
               </p>
             </div>
 
+            {/* Special View: Balance Sheet Table */}
+            {activeTab === 'balance_sheet' && researchData.data?.table && (
+              <div className="p-5 rounded-xl bg-[#111520] border border-[#1e2433] space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-blue-400" />
+                    <span>Consolidated Balance Sheet ({researchData.data.unit || '₹ Crores'})</span>
+                  </h3>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {researchData.data.source || 'Audited Annual Filings'}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto border border-[#1e2433] rounded-lg">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#0a0d14] text-slate-400 font-mono uppercase text-[10px] border-b border-[#1e2433]">
+                      <tr>
+                        <th className="py-2.5 px-3">Balance Sheet Line Item</th>
+                        {(researchData.data.years || []).map((yr: string) => (
+                          <th key={yr} className="py-2.5 px-3 text-right">{yr}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1e2433] font-mono">
+                      {researchData.data.table.map((row: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-[#161c28]/50 transition-colors">
+                          <td className="py-2.5 px-3 font-semibold text-slate-200 font-sans">
+                            {row.metric}
+                          </td>
+                          {(row.values || []).map((val: number | null, vIdx: number) => (
+                            <td key={vIdx} className="py-2.5 px-3 text-right text-slate-200 font-mono">
+                              {val !== null ? `₹${val.toLocaleString()}` : '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Special View: Cash Flow Quality Table */}
+            {activeTab === 'cash_quality' && researchData.data?.table && (
+              <div className="p-5 rounded-xl bg-[#111520] border border-[#1e2433] space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-emerald-400" />
+                    <span>Cash Quality & Capital Allocation ({researchData.data.unit || '₹ Crores'})</span>
+                  </h3>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {researchData.data.source || 'Audited Cash Flow Statements'}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto border border-[#1e2433] rounded-lg">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#0a0d14] text-slate-400 font-mono uppercase text-[10px] border-b border-[#1e2433]">
+                      <tr>
+                        <th className="py-2.5 px-3">Cash Flow Metric</th>
+                        {(researchData.data.years || []).map((yr: string) => (
+                          <th key={yr} className="py-2.5 px-3 text-right">{yr}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1e2433] font-mono">
+                      {researchData.data.table.map((row: any, idx: number) => {
+                        const isFcf = row.metric === 'Free Cash Flow';
+                        const isCfo = row.metric.includes('Operating');
+                        return (
+                          <tr key={idx} className={`hover:bg-[#161c28]/50 transition-colors ${isFcf ? 'bg-emerald-950/15' : ''}`}>
+                            <td className={`py-2.5 px-3 font-sans ${isFcf ? 'font-bold text-emerald-400' : isCfo ? 'font-semibold text-slate-100' : 'text-slate-300'}`}>
+                              {row.metric}
+                            </td>
+                            {(row.values || []).map((val: number | null, vIdx: number) => (
+                              <td key={vIdx} className={`py-2.5 px-3 text-right font-mono ${isFcf ? 'font-bold text-emerald-300' : 'text-slate-200'}`}>
+                                {val !== null ? `₹${val.toLocaleString()}` : '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Special View: Narrative vs Numbers Table */}
             {activeTab === 'narrative_vs_numbers' && researchData.data?.comparisons && (
               <div className="p-5 rounded-xl bg-[#111520] border border-[#1e2433] space-y-4">

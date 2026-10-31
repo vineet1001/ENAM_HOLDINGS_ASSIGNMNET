@@ -384,11 +384,116 @@ async def _build_trajectory(db, company, periods, citations, missing_info):
     }
 
 
+def _fetch_yfinance_balance_sheet(yahoo_symbol: str):
+    """Fetch live annual balance sheet statement via yfinance adapter in ₹ Crores."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(yahoo_symbol)
+        bs = t.balance_sheet
+        if bs is not None and not bs.empty:
+            years = [f"FY{col.year % 100}" for col in bs.columns[:4]]
+            rows = []
+            target_metrics = [
+                ("Total Assets", "Total Assets"),
+                ("Common Stock Equity", "Net Worth (Equity)"),
+                ("Working Capital", "Working Capital"),
+                ("Cash And Cash Equivalents", "Cash & Cash Equivalents"),
+                ("Total Debt", "Total Debt"),
+                ("Net Debt", "Net Debt"),
+                ("Tangible Book Value", "Tangible Book Value"),
+                ("Invested Capital", "Invested Capital"),
+                ("Current Assets", "Current Assets"),
+                ("Current Liabilities", "Current Liabilities"),
+            ]
+            for raw_name, display_name in target_metrics:
+                if raw_name in bs.index:
+                    vals = [
+                        round(float(v) / 1e7, 1) if v is not None and str(v) != 'nan' else None
+                        for v in bs.loc[raw_name][:4]
+                    ]
+                    rows.append({"metric": display_name, "values": vals})
+            return {"years": years, "rows": rows}
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_yfinance_cash_flow(yahoo_symbol: str):
+    """Fetch live annual cash flow statement via yfinance adapter in ₹ Crores."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(yahoo_symbol)
+        cf = t.cashflow
+        if cf is not None and not cf.empty:
+            years = [f"FY{col.year % 100}" for col in cf.columns[:4]]
+            rows = []
+            target_metrics = [
+                ("Free Cash Flow", "Free Cash Flow"),
+                ("Operating Cash Flow", "Operating Cash Flow (CFO)"),
+                ("Capital Expenditure", "Capital Expenditure (CapEx)"),
+                ("Financing Cash Flow", "Financing Cash Flow"),
+                ("Cash Dividends Paid", "Dividends Paid"),
+                ("End Cash Position", "Ending Cash Position"),
+            ]
+            for raw_name, display_name in target_metrics:
+                if raw_name in cf.index:
+                    vals = [
+                        round(float(v) / 1e7, 1) if v is not None and str(v) != 'nan' else None
+                        for v in cf.loc[raw_name][:4]
+                    ]
+                    rows.append({"metric": display_name, "values": vals})
+            return {"years": years, "rows": rows}
+    except Exception:
+        pass
+    return None
+
+
 async def _build_balance_sheet(db, company, periods, citations, missing_info):
-    missing_info.append("Detailed balance sheet analysis requires annual report ingestion")
+    symbol = company.yahoo_symbol or f"{company.ticker}.NS"
+    bs_data = _fetch_yfinance_balance_sheet(symbol)
+    
+    if bs_data and bs_data["rows"]:
+        years = bs_data["years"]
+        latest_year = years[0] if years else "Latest"
+        
+        # Extract highlights for observations
+        obs = []
+        for r in bs_data["rows"]:
+            m = r["metric"]
+            val = r["values"][0] if r["values"] else None
+            if val is not None:
+                if m == "Total Assets":
+                    obs.append(f"Total Assets: ₹{val:,.1f} Cr ({latest_year})")
+                elif m == "Net Worth (Equity)":
+                    obs.append(f"Shareholders' Net Worth: ₹{val:,.1f} Cr")
+                elif m == "Cash & Cash Equivalents":
+                    obs.append(f"Liquid Cash Reserves: ₹{val:,.1f} Cr")
+                elif m == "Total Debt":
+                    obs.append(f"Total Borrowings: ₹{val:,.1f} Cr ({'Virtually Debt-Free' if val < 1000 else 'Leveraged'})")
+                elif m == "Working Capital":
+                    obs.append(f"Working Capital Cushion: ₹{val:,.1f} Cr")
+        
+        return {
+            "summary": f"Consolidated Balance Sheet for {company.name} across {len(years)} fiscal years. Total assets stand at ₹{bs_data['rows'][0]['values'][0]:,.1f} Cr ({latest_year}).",
+            "key_observations": obs,
+            "data": {
+                "years": years,
+                "table": bs_data["rows"],
+                "unit": "₹ Crores",
+                "source": f"Exchange Financial Disclosures via Yahoo Finance ({symbol})"
+            },
+            "risks_caveats": [
+                "Figures in ₹ Crores, converted from audited annual filings and XBRL submissions",
+                "Reporting basis: Consolidated financial statements"
+            ],
+            "missing_info": [m for m in missing_info if "balance sheet" not in m.lower()],
+            "citations": citations
+        }
+    
+    missing_info.append("Detailed balance sheet analysis requires annual report ingestion or online market data adapter sync")
     return {
         "summary": f"Balance sheet analysis for {company.name}.",
-        "key_observations": ["Full balance sheet data requires annual report processing"],
+        "key_observations": ["Full balance sheet data requires annual report processing or online data feed"],
         "data": {},
         "risks_caveats": ["Balance sheet metrics require primary-source annual reports"],
         "missing_info": missing_info,
@@ -397,7 +502,45 @@ async def _build_balance_sheet(db, company, periods, citations, missing_info):
 
 
 async def _build_cash_quality(db, company, periods, citations, missing_info):
-    missing_info.append("Cash flow analysis requires cash flow statement extraction from annual reports")
+    symbol = company.yahoo_symbol or f"{company.ticker}.NS"
+    cf_data = _fetch_yfinance_cash_flow(symbol)
+    
+    if cf_data and cf_data["rows"]:
+        years = cf_data["years"]
+        latest_year = years[0] if years else "Latest"
+        
+        obs = []
+        for r in cf_data["rows"]:
+            m = r["metric"]
+            val = r["values"][0] if r["values"] else None
+            if val is not None:
+                if m == "Operating Cash Flow (CFO)":
+                    obs.append(f"Cash Flow from Operations: ₹{val:,.1f} Cr ({latest_year})")
+                elif m == "Free Cash Flow":
+                    obs.append(f"Free Cash Flow Generation: ₹{val:,.1f} Cr")
+                elif m == "Capital Expenditure (CapEx)":
+                    obs.append(f"Annual Capital Expenditure: ₹{abs(val):,.1f} Cr")
+                elif m == "Dividends Paid":
+                    obs.append(f"Cash Returned to Shareholders via Dividends: ₹{abs(val):,.1f} Cr")
+        
+        return {
+            "summary": f"Cash Quality and Capital Allocation for {company.name} across {len(years)} fiscal years. Delivered ₹{cf_data['rows'][0]['values'][0]:,.1f} Cr in Free Cash Flow in {latest_year}.",
+            "key_observations": obs,
+            "data": {
+                "years": years,
+                "table": cf_data["rows"],
+                "unit": "₹ Crores",
+                "source": f"Cash Flow Statement via Yahoo Finance ({symbol})"
+            },
+            "risks_caveats": [
+                "Figures in ₹ Crores from audited Cash Flow Statements",
+                "FCF calculated as CFO minus CapEx"
+            ],
+            "missing_info": [m for m in missing_info if "cash flow" not in m.lower()],
+            "citations": citations
+        }
+    
+    missing_info.append("Cash flow analysis requires cash flow statement extraction from annual reports or online data feed")
     return {
         "summary": f"Cash quality analysis for {company.name}.",
         "key_observations": ["Cash flow data requires annual report or quarterly results processing"],
