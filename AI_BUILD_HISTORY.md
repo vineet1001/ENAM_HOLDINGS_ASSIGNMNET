@@ -12,7 +12,11 @@ How I built FINN with Claude Code: my prompts, word for word, in the order I sen
 - **I pasted the brief and my own notes** when the work drifted from what ENAM asked for.
 - **I asked for options before big changes** (price prediction methods, OCR size, 500-page reports), then chose.
 - **I tested on my phone** and reported what broke.
-
+Some basic structure is made using a simple prompt
+```text
+ By extracting the ps  given in the file make a basic web app for finn
+```
+This was stored on the readme file. 
 ## 1. Audit and first improvements
 
 **Prompt 1** · *Pointed Claude Code at the brief, the reference PDF and the README of the work so far.*
