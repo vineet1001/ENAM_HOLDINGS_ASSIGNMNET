@@ -3,6 +3,7 @@
 import React from 'react';
 import { X, UserCheck, ExternalLink, ShieldCheck, AlertTriangle, Briefcase, GraduationCap } from 'lucide-react';
 import { ManagementChangeEnrichment } from '@/types';
+import { Sheet } from '@/components/Sheet';
 
 export function ExecutiveEnrichmentModal({
   data,
@@ -16,8 +17,8 @@ export function ExecutiveEnrichmentModal({
   const isVerified = p.verification_status === 'verified';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-[#111520] border border-[#1e2433] rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6">
+    <Sheet open onClose={onClose} label={`Executive background for ${data.company_ticker}`} maxWidth="md:max-w-lg">
+      <div className="px-4 pb-6 md:p-6">
         {/* Header */}
         <div className="flex items-start justify-between pb-4 border-b border-[#1e2433]">
           <div>
@@ -72,7 +73,7 @@ export function ExecutiveEnrichmentModal({
             <div>
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-2">
                 <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-                <span>Verified Career Trajectory</span>
+                <span>{isVerified ? 'Verified Career Trajectory' : 'Career Trajectory (Unverified)'}</span>
               </div>
               <div className="space-y-1.5">
                 {p.career_history.map((item, idx) => (
@@ -112,7 +113,8 @@ export function ExecutiveEnrichmentModal({
           <span className="text-slate-400">
             Source: <span className="text-slate-300 font-medium">{p.source_type}</span>
           </span>
-          {p.source_url && (
+          {/* Placeholder demo filing URLs lead nowhere */}
+          {p.source_url && !p.source_url.includes('/demo_') && (
             <a
               href={p.source_url}
               target="_blank"
@@ -125,7 +127,7 @@ export function ExecutiveEnrichmentModal({
           )}
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }
 

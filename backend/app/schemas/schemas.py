@@ -95,6 +95,7 @@ class AnnouncementResponse(BaseModel):
     is_demo: bool
     status: str = "new"
     priority_score: float | None = None
+    insight: dict | None = None
 
     class Config:
         from_attributes = True
@@ -168,6 +169,8 @@ class AlertEventResponse(BaseModel):
     related_announcement_category: str | None = None
     source_url: str | None = None
     source_sites: list[AlertSourceSite] = []
+    filing_title: str | None = None
+    insight: dict | None = None
 
     class Config:
         from_attributes = True

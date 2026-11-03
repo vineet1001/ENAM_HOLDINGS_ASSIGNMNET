@@ -21,9 +21,20 @@ module.exports = {
       },
       fontFamily: {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
-      }
+      },
+      keyframes: {
+        'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'slide-up': { from: { transform: 'translateY(24px)', opacity: '0' }, to: { transform: 'translateY(0)', opacity: '1' } },
+        'slide-left': { from: { transform: 'translateX(24px)', opacity: '0' }, to: { transform: 'translateX(0)', opacity: '1' } },
+        'flash': { '0%': { boxShadow: '0 0 0 2px rgba(96,165,250,0.9)' }, '100%': { boxShadow: '0 0 0 2px rgba(96,165,250,0)' } },
+      },
+      animation: {
+        'fade-in': 'fade-in 150ms ease-out',
+        'slide-up': 'slide-up 200ms ease-out',
+        'slide-left': 'slide-left 200ms ease-out',
+        'flash': 'flash 2.5s ease-out',
+      },
     },
   },
   plugins: [],
 };
-

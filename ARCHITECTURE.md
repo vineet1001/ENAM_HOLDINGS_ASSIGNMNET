@@ -1,96 +1,107 @@
-# FINN: System Architecture & Design Rationale
+# FINN architecture
 
-## 1. High-Level Architecture
-
-FINN operates as a modular monolith organized into two distinct operational flows:
-1. **Push Pipeline (Surveillance & Alerting):** Proactively ingests, classifies, filters, and notifies investors of material changes.
-2. **Pull Pipeline (Primary-Source Research Desk):** Discovers, parses, extracts, and cites primary evidence on demand for any supported ticker.
+## Overview
 
 ```
-       [ Investor Web / Mobile Workstation ]
-                      │
-           (Next.js 14 App Router)
-                      │  REST / JSON
-                      ▼
-             [ FastAPI Backend ]
-       ┌──────────────┴──────────────┐
-       ▼                             ▼
-[ Push Pipeline ]             [ Pull Pipeline ]
-• MarketDataService           • DocumentDiscoveryService
-• FilingClassifier            • Text Chunking & Indexing
-• MaterialityRanker           • GuidanceTracker
-• AlertEngine                 • NarrativeVsNumbersEngine
-• ExecutiveEnricher           • Primary Citation Generator
-       └──────────────┬──────────────┘
-                      ▼
-     [ Persistent Storage & Deterministic Math ]
-     • 16 SQLAlchemy Models (SQLite / PostgreSQL)
-     • Pure Python Financial Calculations
+Phone or desktop browser
+        |
+Next.js 14 (App Router, TypeScript, Tailwind)   /api is proxied to the backend
+        |
+FastAPI + SQLAlchemy async + SQLite
+        |
+  +-----+---------------------+----------------------+------------------+
+  |                           |                      |                  |
+Yahoo Finance            NSE and BSE            Screener.in        One AI platform
+prices, volume           announcements          reported tables,   Gemini, Groq,
+                         + original PDFs        report and         OpenAI or Anthropic
+                                                transcript links
 ```
 
----
+Three background loops run inside the backend process:
 
-## 2. Core Service Components
+- **Live sync** fetches filings and prices, stores them, runs the rules and sends notifications. The interval is set in Alert Settings.
+- **Filing reader** reads alerted filings one at a time, newest first, and stays idle with no key.
+- **Document reader** downloads and extracts a company's annual report and transcripts one company at a time. PDF extraction runs in its own process so a large report can't stall other requests.
 
-### A. MarketDataService (`yfinance` Adapter)
-* Retrieves daily Open, High, Low, Close, Adjusted Close, and Volume for NSE securities mapped with `.NS`.
-* Computes daily percentage price movements and 20-day moving average volumes.
-* Retains previously cached observations during rate limits or holidays, explicitly labeling data freshness rather than injecting fake prices.
+## Rules the code follows
 
-### B. AnnouncementClassifier & MaterialityRanker (`classifier.py`)
-* Implements a hybrid classification architecture supporting 17 standardized categories:
-  `results`, `M&A`, `fund_raise`, `management_change`, `litigation`, `insider_trading`, `earnings_call`, `investor_meetings`, `credit_rating`, `dividend`, `bonus_split`, `capex`, `press_release`, `postal_ballot`, `agm_egm`, `pledging`, `unclassified`.
-* Scores materiality transparently using a 3-part weighting equation:
-  $$\text{Score} = (0.50 \times \text{Category Weight}) + (0.20 \times \text{Confidence}) + (0.30 \times \text{Recency Decay})$$
-* Recency decay is bounded to ensure that historical high-impact items (e.g. M&A or Results) are never eclipsed simply because routine paperwork is more recent.
+1. **Python does all the arithmetic.** Models copy numbers. Margins, QoQ, YoY, growth rates and thresholds are calculated in code.
+2. **Model output is checked, not trusted.**
+   - A printed figure in a results table is dropped if it isn't in the filing's text.
+   - A guidance quote is dropped if it isn't in the transcript, and its page is taken from where it was actually found.
+   - A person in a bio is dropped if the filing doesn't name them.
+   - A verdict on a promise that was never extracted is discarded.
+   - A source id that wasn't supplied resolves to nothing.
+   - Any other number that can't be matched is shown with a visible flag.
+3. **Pull research uses only primary documents.** The prompt forbids outside knowledge, and document text is marked as data, not instructions. This is a strong instruction but not a guarantee, which is why rule 2 exists.
+4. **It works without a model.** Numeric views need no key. Document views fall back to page-linked excerpts and pattern-matched sentences, and always say so.
+5. **Missing data is stated.** No transcripts, a scanned PDF, a failed source and a model error each produce their own message.
 
-### C. AlertEngine (`alert_engine.py`)
-* Evaluates price, volume, and announcement rules deterministically.
-* Employs deterministic deduplication keys (`price_{rule_id}_{company_id}_{date}`, `volume_{rule_id}_{company_id}_{date}`, `announcement_{rule_id}_{ann_id}`) with unique constraints to ensure that repeated evaluation runs never trigger redundant notifications.
+## Push
 
-### D. FinancialMetricsService (`financial_calc.py`)
-* Pure deterministic Python implementation.
-* Standardized QoQ and YoY formulas with safeguards against zero or negative denominators:
-  $$\text{Change \%} = \frac{\text{Current} - \text{Previous}}{|\text{Previous}|} \times 100$$
-* Enforces consistency between consolidated and standalone accounting bases.
+| Step | What happens | Where |
+|---|---|---|
+| Collect | NSE and BSE filings merged per company, with exchange labels mapped to 17 categories | `services/live_data.py` |
+| Decide | Rules for price, volume and filing category, with de-duplication. A stock's own limit replaces the global one | `services/alert_engine.py` |
+| Read | Results filing: one model call gives the headline and the table. Management filing: one call gives the headline and bios | `services/filing_ai.py` |
+| Deliver | Digest, alert cards, browser notifications, Telegram | `app/page.tsx`, `services/notifications.py` |
+| Tune | Thresholds, presets, per-stock limits, categories and digest defaults, with a preview of how often a value would have fired | `app/settings/alerts/page.tsx`, `services/alert_settings.py` |
 
-### E. Research Copilot & Guidance Tracker
-* Aligns management guidance statements with reported financial outcomes over matching fiscal periods.
-* Assigns verified statuses: `achieved`, `missed`, `exceeded`, or `not_assessable`.
-* Attaches exact document citations and page references to every factual finding.
+Before a model has read a results filing, the card shows the latest reported quarter from Screener's table and labels it as such.
 
----
+## Pull
 
-## 3. Database Schema Design (16 Entities)
+| View | Comes from | Model? |
+|---|---|---|
+| Financial snapshot, Trajectory, Balance sheet, Cash quality | Screener tables through `services/fundamentals.py` | No |
+| Business | Annual report's narrative pages | Light |
+| Guidance | Each transcript, read once and saved | Light |
+| Narrative vs numbers | Saved guidance + reported numbers + later commentary | Strong |
+| Bull vs bear | Reported numbers + retrieved passages | Strong, or numbers only with no key |
+| Free-form question | Retrieved passages + reported numbers | Light |
+| Price scenarios | Ten years of prices + reported EPS and cash flow, through `services/price_scenarios.py` | No |
 
-* `companies`: NSE ticker, company name, sector, industry, Yahoo symbol, market cap tier.
-* `portfolio_memberships`: Mapping of companies to user portfolios and watchlist flags.
-* `price_bars`: EOD OHLCV observations with source and demo flags.
-* `announcements`: Corporate filings metadata, original links, filing dates, priority scores.
-* `announcement_classifications`: Category, confidence score, extraction method, evidence snippets.
-* `alert_rules`: User-defined thresholds for price %, volume multiples, and filing categories.
-* `alert_events`: Logged trigger events with observed vs threshold values and unique dedup keys.
-* `financial_periods`: Fiscal year, quarter, start/end dates, reporting basis (consolidated/standalone).
-* `financial_metrics`: Revenue, EBITDA, PBT, PAT, debt, cash, operating cash flow, capex.
-* `guidance_statements`: Quantified forward promises extracted from concalls, target periods, and actual delivery.
-* `source_documents`: Annual reports, quarterly filings, and concall transcripts.
-* `document_chunks`: Indexed text passages, table rows, section headings, and page offsets.
-* `extracted_facts`: Structured key-value facts with extraction confidence.
-* `citations`: Direct links linking analytical claims to primary document passages.
-* `research_sessions`: User research queries and workflow state.
-* `research_answers`: Structured research syntheses, observations, caveats, and citations.
+**Price scenarios** contains:
+- **Volatility range:** a lognormal band with no assumed trend, plus a check of how often the same kind of band held in the stock's own past.
+- **Trend signals:** 50- and 200-day averages, RSI and Bollinger bands.
+- **P/E band:** the stock's own year-end P/E history applied to the last 12 months' EPS.
+- **Reverse DCF:** the growth the current price needs, for a choice of required return and long-run growth.
 
----
+None of it is presented as a forecast.
 
-## 4. Key Architectural Trade-Offs
+**Weight suggestions** (`services/portfolio_optimizer.py`) use Markowitz mean-variance optimisation:
+- Long only, with a cap per stock.
+- Covariance is lightly shrunk, so a few noisy years count for less.
+- The goal is either the best Sharpe ratio or the lowest risk, solved with plain numpy.
+- They're offered inside the portfolio builder and only applied if the user chooses.
 
-1. **Deterministic Code vs LLM for Financial Math:**
-   * *Decision:* All arithmetic, margin calculations, and alert triggers are written in pure Python.
-   * *Rationale:* LLMs frequently suffer from token arithmetic inaccuracies and rounding drift. In institutional finance, calculation correctness must be 100% reproducible.
-2. **Self-Contained SQLite vs Vector DB Cluster:**
-   * *Decision:* Used local structured SQLite storage with document chunks and section indexing.
-   * *Rationale:* Ensures zero cost, immediate offline execution, reproducible seeding, and avoids complex external vector cluster dependencies during screening evaluation.
-3. **Primary-Source Discipline:**
-   * *Decision:* Secondary news articles, blog posts, and broker opinions are excluded from pull-mode analysis.
-   * *Rationale:* Investment teams require defensible, auditable primary evidence directly from company disclosures.
+**Document summaries** (`services/document_summary.py`) cover every page of an annual report, transcript or presentation on the Sources page:
+- The document is split into runs of whole pages of about 100,000 characters (18,000 on Groq, whose free tier allows far fewer tokens a minute). A transcript is usually one call. A 500-page annual report is about 15 part calls with the light model, then one call with the stronger model that writes the summary from those notes.
+- The page states the number of calls before anything starts. The work runs in the background, and each part is saved as it finishes, so a quota pause or a restart carries on rather than starting again.
+- The check is the same as for filings. A figure whose value isn't in the document is removed, a point with an unmatched number is flagged, and page references outside the document are cleared.
+- Without a key, the page shows the document's most representative sentences instead. They're scored TF-IDF style across pages, with name lists, table rows and boilerplate skipped, and taken from the front 40% of an annual report.
 
+**Interface:** a dark and a light theme, chosen from the header, the sidebar or the phone menu and kept in the browser. The light theme remaps the fixed dark colours in `globals.css`, keeping text at WCAG AA contrast and chart colours validated for a white surface. On a phone, the bottom bar has four pages and a Menu that lists every page.
+
+## Keeping costs down
+
+- **Routing:** routine reading uses a light model, and only the two reasoning views use the stronger one. Both can be changed per platform in Settings.
+- **Caching:** filing insights are saved per document. Research answers are saved against the documents and latest quarter they used, so they're only redone when something new arrives. Screener pages are cached for 12 hours.
+- **Less text per call:** filings send the pages most relevant to their category. Research sends retrieved passages, not whole reports.
+- **No vector database:** retrieval is BM25 in plain Python. A search across a company's documents takes about 0.1 seconds and needs no embeddings service.
+- **Pacing:** background reading is spaced out and pauses when the platform reports a rate limit.
+
+## Known limits
+
+- **Screener.in is a secondary source for the tables.** It compiles company filings. It's used for multi-year history. Results alerts read the filing itself when a model is available.
+- **Scanned PDFs up to 12 pages are read by OCR.** Longer scans, such as a scanned annual report, are still reported as unreadable. OCR text can misread a digit, and the number check can't catch that, so OCR-read filings are labelled.
+- **Prices are end of day**, so a price or volume alert describes the latest close, not the live market.
+- **Retrieval is keyword based.** Common finance synonyms are added, for example debt and borrowings, but a passage worded very differently from the question can still be missed.
+- **Results figures are checked twice.** Each figure must appear in the filing, and a row is flagged when its figures aren't printed on one line together. A real number attached to the wrong line can still slip through if it happens to share a line.
+- **Quotes may be lightly tidied by the model.** A near-identical sentence is accepted, and the page shows the transcript's own words, not the model's.
+- **Price scenarios aren't forecasts.** The volatility range assumes no trend. The P/E band can be distorted when reported EPS isn't adjusted for a split, and such years are dropped. The reverse DCF can't subtract cash.
+- **Weight suggestions rely on past returns**, which are a weak guide to future ones.
+- **Summaries of very long reports** cover the first 500 pages, which is all that's read, and the page says so. A summary built from part notes can miss a detail that only matters across parts.
+- **Companies with no transcripts:** investor presentations are read instead, and these say less.
+- **Bios use only what the filing says.** LinkedIn is a search link, not scraped.
+- **No user accounts.** One shared portfolio set and one set of thresholds.

@@ -1,4 +1,5 @@
 """Financial data and quarterly results API endpoints."""
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_
@@ -11,6 +12,7 @@ from app.schemas.schemas import (
     QuarterlyComparisonResponse, QuarterlyComparisonRow,
     FinancialMetricResponse, GuidanceStatementResponse
 )
+from app.services import fundamentals, live_data, screener
 from app.services.financial_calc import pct_change, margin, safe_round
 
 router = APIRouter(prefix="/api", tags=["financials"])
@@ -38,6 +40,16 @@ async def get_company_financials(
     if not company:
         raise HTTPException(status_code=404, detail=f"Company '{ticker}' not found")
     
+    # Real reported numbers first. Seeded sample figures are only a fallback, and are labelled as demo.
+    try:
+        data = await asyncio.to_thread(screener.get_company_data, company.ticker, company.yahoo_symbol)
+    except live_data.LiveDataUnavailable:
+        data = None
+    if data:
+        real = fundamentals.quarterly_comparison(data, company.ticker, company.name)
+        if real:
+            return real
+
     # Get all quarterly periods, sorted by fiscal year and quarter descending
     periods_result = await db.execute(
         select(FinancialPeriod)

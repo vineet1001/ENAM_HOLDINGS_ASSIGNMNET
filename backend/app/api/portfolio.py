@@ -1,4 +1,5 @@
 """Portfolio and Company API endpoints."""
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_, or_, delete
@@ -14,6 +15,8 @@ from app.schemas.schemas import (
     CompanyResponse, CompanyCreate, CompanySearchResult,
     PortfolioAddRequest, PortfolioResponse, PriceBarResponse, PriceDataResponse
 )
+from app.api.portfolios import ensure_company
+from app.services import live_data
 from app.services.financial_calc import pct_change
 
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -66,7 +69,8 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
             select(func.count(AlertEvent.id))
             .where(
                 AlertEvent.company_id == company.id,
-                AlertEvent.is_acknowledged == False
+                AlertEvent.is_acknowledged == False,
+            AlertEvent.is_demo == False
             )
         )
         alert_count = alert_result.scalar_one()
@@ -107,16 +111,9 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
 
 @router.post("/portfolio")
 async def add_to_portfolio(req: PortfolioAddRequest, db: AsyncSession = Depends(get_db)):
-    """Add a company to the portfolio."""
-    # Find the company
-    result = await db.execute(
-        select(Company).where(Company.ticker == req.ticker.upper())
-    )
-    company = result.scalar_one_or_none()
-    
-    if not company:
-        raise HTTPException(status_code=404, detail=f"Company with ticker '{req.ticker}' not found")
-    
+    """Add a company to the portfolio, including any listed company not yet in the database."""
+    company = await ensure_company(db, req.ticker)
+
     # Check if already in portfolio
     existing = await db.execute(
         select(PortfolioMembership).where(
@@ -133,7 +130,8 @@ async def add_to_portfolio(req: PortfolioAddRequest, db: AsyncSession = Depends(
         added_at=datetime.utcnow()
     )
     db.add(pm)
-    await db.flush()
+    # Commit before responding: the page reloads the portfolio straight after this.
+    await db.commit()
     
     return {"message": f"Added {req.ticker} to portfolio", "company_id": company.id}
 
@@ -153,6 +151,7 @@ async def remove_from_portfolio(ticker: str, db: AsyncSession = Depends(get_db))
             PortfolioMembership.company_id == company.id
         )
     )
+    await db.commit()
     return {"message": f"Removed {ticker} from portfolio"}
 
 
@@ -190,8 +189,25 @@ async def search_companies(
             exchange=c.exchange,
             in_portfolio=in_portfolio
         ))
-    
-    return {"results": response, "total": len(response)}
+
+    # Every other listed company comes from the exchanges' own lists
+    known = {c.ticker for c in companies}
+    universe_available = True
+    try:
+        listed = await asyncio.to_thread(live_data.search_universe, q)
+    except live_data.LiveDataUnavailable:
+        listed = []
+        universe_available = False
+    for company in listed:
+        if company["ticker"] not in known:
+            response.append(CompanySearchResult(
+                ticker=company["ticker"],
+                name=company["name"],
+                exchange=" + ".join(company["exchanges"]),
+                in_portfolio=False
+            ))
+
+    return {"results": response[:30], "total": len(response), "universe_available": universe_available}
 
 
 @router.get("/companies/{ticker}")
@@ -232,7 +248,8 @@ async def get_company(ticker: str, db: AsyncSession = Depends(get_db)):
     alert_result = await db.execute(
         select(func.count(AlertEvent.id)).where(
             AlertEvent.company_id == company.id,
-            AlertEvent.is_acknowledged == False
+            AlertEvent.is_acknowledged == False,
+            AlertEvent.is_demo == False
         )
     )
     alert_count = alert_result.scalar_one()

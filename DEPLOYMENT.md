@@ -1,107 +1,57 @@
-# FINN Deployment Guide
+# Running and deploying FINN
 
-This document describes how to deploy FINN in local development, containerized environments, and cloud infrastructure.
+## Run it locally
 
----
-
-## 1. Local Development Setup
-
-### System Requirements
-* Python 3.10+
-* Node.js 18+ (Node 20+ recommended)
-* 2 GB RAM minimum
-
-### Step-by-Step Installation
+Needs Python 3.11+ and Node 20+.
 
 ```bash
-# 1. Environment configuration
-cp .env.example .env
-
-# 2. Python Virtual Environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
-
-# 3. Database Initialization & Seeding
-python backend/run_seed.py
-
-# 4. Frontend Build
-cd frontend
-npm install
-npm run build
-cd ..
-
-# 5. Start Servers
+cd frontend && npm install && npm run build && cd ..
 python run_finn.py
 ```
 
----
+Open http://localhost:3000. Prices, filings, reported financials and alerts work straight away. To turn on AI reading, add a key under **Settings**. It takes effect without a restart.
 
-## 2. Docker & Containerized Deployment
+The OCR packages, `rapidocr-onnxruntime` and `pypdfium2`, add about 190 MB, mostly OpenCV. Without them, scanned filings are reported as unreadable and everything else works.
 
-FINN provides multi-stage container definitions and a Docker Compose orchestrator.
+`run_finn.py` stops with a clear message if port 3000 or 8000 is taken, or if a server fails to start.
 
-### Launch with Docker Compose
+## Docker
+
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-The stack exposes:
-* **Frontend:** `http://localhost:3000`
-* **FastAPI Backend:** `http://localhost:8000`
-* **Persistent SQLite Volume:** `./backend/data` mapped to `/app/data` inside container
+The database, downloaded document text and saved keys all live in `./backend/data`. Set `FINN_ADMIN_TOKEN` in your shell first if you want to change AI keys from the browser, because requests through the container network don't count as local.
 
-### Verifying Service Health
-```bash
-curl -f http://localhost:8000/api/health
-```
+These Docker files haven't been run yet, because the machine this was built on has no Docker.
 
-Expected response:
-```json
-{
-  "status": "ok",
-  "version": "1.0.0",
-  "demo_mode": true,
-  "llm_configured": false,
-  "database": "connected",
-  "timestamp": "2026-10-28T16:50:00Z"
-}
-```
+## Hosting it
 
----
+FINN is one long-running Python process with background jobs and a SQLite file, so the backend needs a host that keeps a process alive and has a persistent disk, such as Render or Railway. Serverless functions won't work for the backend.
 
-## 3. Production Persistence & Migration to PostgreSQL
+1. **Backend:** deploy `Dockerfile.backend` with a disk mounted at `/app/data`. Set `FINN_ENV_FILE=/app/data/.env` and a long random `FINN_ADMIN_TOKEN`.
+2. **Frontend:** deploy `frontend/` to Vercel, or use `Dockerfile.frontend`. Set `BACKEND_URL` to the backend's address **at build time**, because Next.js fixes the proxy target when it builds.
+3. Open the site, go to **Settings**, enter the admin token, and add a model key.
 
-While FINN uses SQLite with asynchronous connection handling for straightforward local development, all models use standard SQLAlchemy 2.0 ORM conventions.
+### Check these after deploying
 
-To migrate to PostgreSQL:
-1. Update `DATABASE_URL` in `.env`:
-   ```env
-   DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/finn
-   SYNC_DATABASE_URL=postgresql://user:password@localhost:5432/finn
-   ```
-2. Install the asyncpg driver:
-   ```bash
-   pip install asyncpg psycopg2-binary
-   ```
-3. Run initialization:
-   ```bash
-   python backend/run_seed.py
-   ```
-   Tables, foreign keys, cascade deletes, and composite indexes will be created automatically.
+- **Exchanges may block cloud servers.** NSE is known to refuse many data-centre IP addresses. FINN falls back to BSE for filings and says when a source fails, so open the Alerts and Sources pages on the live site and confirm filings and documents arrive.
+- **Free hosts sleep.** Background checks stop while the host sleeps, and the first request afterwards is slow.
+- **Everyone shares one set of data.** There are no user accounts, so anyone with the link can change portfolios, rules and thresholds. Only AI keys and Telegram details are protected. That's fine for a review prototype, not for real use.
 
----
+## Settings
 
-## 4. Environment Variables Reference
+Everything is optional.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `sqlite+aiosqlite:///data/db/finn.db` | Async database connection string |
-| `SYNC_DATABASE_URL` | `sqlite:///data/db/finn.db` | Sync connection string for table migration |
-| `DEMO_MODE` | `true` | Enables deterministic demonstration dataset |
-| `YAHOO_FINANCE_ENABLED` | `true` | Allows on-demand EOD market data ingestion |
-| `DEFAULT_PRICE_ALERT_THRESHOLD` | `3.0` | Default price move threshold (%) |
-| `DEFAULT_VOLUME_MULTIPLIER` | `2.0` | Default unusual volume spike multiplier (x) |
-| `API_PORT` | `8000` | Backend port |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000/api` | Backend URL consumed by frontend |
-
+| `LLM_PROVIDER` | `gemini` | `gemini`, `groq`, `openai` or `anthropic`. Usually set from Settings |
+| `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | none | Usually set from Settings |
+| `LLM_MIN_SECONDS_BETWEEN_CALLS` | `5` | Keeps background reading inside free-tier limits |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | none | Alerts to your phone. Usually set from Alert Settings |
+| `FINN_ADMIN_TOKEN` | none | Required to change keys from anywhere but the machine running FINN |
+| `FINN_ENV_FILE` | `backend/.env` | Where keys are saved |
+| `FINN_DOCS_DIR` | `backend/data/documents` | Where document text is saved |
+| `DEMO_MODE` | `true` | Keeps the labelled sample digest available behind the Demo switch |
+| `BACKEND_URL` | `http://localhost:8000` | Frontend build setting: where `/api` is proxied |

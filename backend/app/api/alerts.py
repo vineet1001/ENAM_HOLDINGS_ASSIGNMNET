@@ -12,6 +12,8 @@ from app.models.announcement import Announcement
 from app.schemas.schemas import (
     AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse, AlertEventResponse, AlertSourceSite
 )
+from app.services import filing_ai, live_sync
+from app.services.active_portfolio import active_company_ids
 from app.services.alert_engine import evaluate_all_alerts
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -138,15 +140,22 @@ async def evaluate_alerts(db: AsyncSession = Depends(get_db)):
     return result
 
 
+@router.post("/sync")
+async def sync_alerts():
+    """Fetch the latest real filings and prices for the active portfolio, then run the rules."""
+    return await live_sync.sync_live_alerts()
+
+
 @router.get("/events")
 async def get_alert_events(
     acknowledged: bool | None = None,
     company_ticker: str | None = None,
     rule_type: str | None = None,
+    include_demo: bool = False,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get triggered alert events."""
+    """Get triggered alert events: real ones for the active portfolio, unless demo ones are asked for."""
     query = (
         select(AlertEvent)
         .join(AlertRule, AlertEvent.alert_rule_id == AlertRule.id)
@@ -162,7 +171,12 @@ async def get_alert_events(
         )
     if rule_type:
         query = query.where(AlertRule.rule_type == rule_type)
-    
+    if not include_demo:
+        query = query.where(
+            AlertEvent.is_demo == False,  # noqa: E712
+            AlertEvent.company_id.in_(await active_company_ids(db))
+        )
+
     result = await db.execute(query)
     events = result.scalars().all()
     
@@ -248,8 +262,14 @@ async def get_alert_events(
             related_announcement_id=related_ann.id if related_ann else event.related_announcement_id,
             related_announcement_category=related_category,
             source_url=source_url,
-            source_sites=source_sites
+            source_sites=source_sites,
+            filing_title=related_ann.title if related_ann else None,
         ))
+
+    insights = await filing_ai.insight_payloads(db, [r.source_url for r in responses if r.source_url and not r.is_demo])
+    for response in responses:
+        if not response.is_demo:
+            response.insight = insights.get(response.source_url)
     
     return {"events": responses, "total": len(responses)}
 

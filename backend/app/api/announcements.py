@@ -12,6 +12,7 @@ from app.schemas.schemas import (
     AnnouncementResponse, AnnouncementListResponse,
     DigestRequest, DigestResponse, DigestItemResponse
 )
+from app.services import filing_ai
 from app.services.classifier import (
     classify_announcement, compute_materiality_score, CATEGORY_DESCRIPTIONS
 )
@@ -106,6 +107,7 @@ async def get_all_announcements(
     category: str | None = None,
     company_ticker: str | None = None,
     status: str | None = None,
+    is_demo: bool | None = None,
     hours: int = Query(168, ge=1, le=8760),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db)
@@ -130,10 +132,12 @@ async def get_all_announcements(
         query = query.where(Company.ticker == company_ticker.upper())
     if status:
         query = query.where(Announcement.status == status)
-    
+    if is_demo is not None:
+        query = query.where(Announcement.is_demo == is_demo)
+
     ann_result = await db.execute(query)
     announcements = ann_result.scalars().all()
-    
+
     responses = []
     for ann in announcements:
         c_result = await db.execute(select(Company).where(Company.id == ann.company_id))
@@ -147,6 +151,11 @@ async def get_all_announcements(
         ann.classification = cls_result.scalar_one_or_none()
         responses.append(_build_announcement_response(ann, company))
     
+    insights = await filing_ai.insight_payloads(db, [r.source_url for r in responses if r.source_url and not r.is_demo])
+    for response in responses:
+        if not response.is_demo:
+            response.insight = insights.get(response.source_url)
+
     return AnnouncementListResponse(
         announcements=responses,
         total=len(responses),
@@ -248,7 +257,7 @@ async def get_digest(
     if DEMO_MODE:
         # Find the date range of stored announcements
         date_result = await db.execute(
-            select(func.max(Announcement.filing_date))
+            select(func.max(Announcement.filing_date)).where(Announcement.is_demo == True)  # noqa: E712
         )
         max_date = date_result.scalar_one_or_none()
         if max_date:
@@ -265,7 +274,11 @@ async def get_digest(
     ann_result = await db.execute(
         select(Announcement)
         .join(Company, Announcement.company_id == Company.id)
-        .where(Announcement.filing_date.between(start_time, end_time))
+        .where(
+            Announcement.filing_date.between(start_time, end_time),
+            # This digest is the sample feed; real filings come from /api/live/filings.
+            Announcement.is_demo == DEMO_MODE
+        )
         .order_by(Announcement.priority_score.desc().nullslast(), Announcement.filing_date.desc())
     )
     announcements = ann_result.scalars().all()
@@ -275,6 +288,7 @@ async def get_digest(
         ann_result = await db.execute(
             select(Announcement)
             .join(Company, Announcement.company_id == Company.id)
+            .where(Announcement.is_demo == DEMO_MODE)
             .order_by(Announcement.priority_score.desc().nullslast(), Announcement.filing_date.desc())
             .limit(50)
         )

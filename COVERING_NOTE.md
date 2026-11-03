@@ -1,74 +1,36 @@
-# Submission Covering Note & Review Checklist
+# Submission note
 
-**To:** assessment@enam.com  
-**Subject:** ENAM - IIT screening - 2027  
-**Candidate:** AI Engineer Evaluation  
-**Product:** FINN — Institutional Financial Investment Intelligence Agent  
+**To:** assessment@enam.com
+**Subject:** ENAM - IIT screening - 2027
 
----
+- **Mobile prototype:** [add link]
+- **GitHub repository:** [add link]
+- **AI build history:** [add link or attachment]
 
-## 1. Executive Summary
+## What I built
 
-FINN is a full-stack, mobile-first intelligence layer built for public-market equity investment teams. It reconciles high-volume exchange filings, market price action, and corporate earnings disclosures into actionable primary intelligence.
+FINN is a mobile-first investment agent for Indian listed companies. Its Push side tells you what needs attention in your portfolio. Its Pull side researches any listed company from its own annual report and concall transcripts.
 
-The application is implemented in the workspace as a runnable, end-to-end system:
-* **Frontend:** Next.js 14 (App Router) + TypeScript + Tailwind CSS + Lucide Icons.
-* **Backend:** Python 3.13 + FastAPI + SQLAlchemy 2.0 + SQLite (with clean path to PostgreSQL).
-* **Storage:** 16 relational models storing companies, prices, filings, alert rules, financial periods, facts, and primary citations.
-* **Determinism:** 100% pure Python arithmetic for all margins, QoQ/YoY changes, volume multiples, and alert triggers.
+**Push.** The briefing shows real NSE and BSE filings for your portfolio over a window you choose, with routine items collapsed. Alerts fire on material filings, unusual volume and price moves. Each investor sets those limits on an Alert Settings page, including per-stock limits, and the page shows how often a value would have fired over the last 30 sessions before it's saved. A results filing shows Revenue, EBITDA, PBT and PAT with QoQ and YoY from the filing. A management change shows a short bio of the person, from the filing.
 
----
+**Pull.** Eight views for any NSE or BSE company: business, financial snapshot, trajectory, balance sheet with working-capital cycle, cash quality, narrative vs numbers, guidance, and bull vs bear. Narrative vs numbers is the centre of it: it lists what management promised on the last calls, gives each promise a verdict against what was reported, and shows management's exact words with a link to the page.
 
-## 2. Core Workflows Implemented & Verified
+## The decisions that matter
 
-| Workflow | Challenge Requirement | Implementation Details |
-|---|---|---|
-| **Workflow 1: Daily Intelligence** | Home screen portfolio surveillance & digest | Prioritized announcement digest across 24h, 3d, 7d windows; transparent materiality scoring ($0.50 \times \text{Category} + 0.20 \times \text{Conf} + 0.30 \times \text{Recency}$); collapsed routine announcements. |
-| **Workflow 2: Quarterly Results** | P&L comparison table with QoQ & YoY | Revenue, EBITDA, PBT, PAT extracted and displayed alongside immediately preceding quarter and year-ago quarter; EBITDA margin calculated; consistent consolidated vs standalone basis enforced. |
-| **Workflow 3: Triggered Alerts** | Configurable rules & deduplicated events | Supports Type A (price moves >3%), Type B (volume spikes >2x 20-day average), and Type C (filing category subscriptions); manual "Evaluate alerts" action; deduplication keys prevent re-triggering. |
-| **Workflow 4: Management Change** | Executive transition enrichment | Incoming/outgoing executive detection; verified professional background cards detailing career history, prior roles, credentials, and source links. |
-| **Workflow 5: Company Research** | On-demand pull workbench for any ticker | Supports all 18 portfolio stocks + 5 ad-hoc research tickers (`ADANIPORTS`, `TRENT`, `BEL`, `DMART`, `ZOMATO`); 8 specialized analytical views. |
-| **Workflow 6: Narrative vs Numbers** | Guidance vs delivery tracking | Structured table comparing management promises against subsequently reported outcomes over matching quarters (`achieved`, `missed`, `exceeded`, `not_assessable`). |
-| **Workflow 7: Mobile Experience** | Responsive viewport usability | Restrained financial UI; compact tables; bottom navigation bar for mobile one-thumb interaction; desktop sidebar. |
-| **Workflow 8: Resilience** | Graceful degradation without API keys | Fully demonstrable and runnable offline with synthetic demo dataset; transparent offline and stale data labels; zero reliance on paid vector databases. |
+**Models read; Python calculates and checks.** A model copies numbers and quotes from documents. Code does the arithmetic, then checks the output: a figure missing from the filing is dropped, a quote not found in the transcript is dropped, and any other unmatched number is flagged on screen. A wrong number is the worst thing this product could show, so this got the most attention.
 
----
+**It's useful with no key.** Prices, filings, alerts, financial views and document search all work without a model. The AI layer adds reading on top, and when it's missing or failing the page says so.
 
-## 3. Important Architectural Decisions & Trade-Offs
+**Cost.** Routine reading goes to a light model, and only the two views that reason across documents use a stronger one. Every answer is saved, so nobody pays to read the same document twice. Retrieval is BM25 in plain Python, with no vector database.
 
-1. **Deterministic Calculations vs LLM Arithmetic:**
-   * In financial analysis, numeric hallucination is unacceptable. All financial ratios, percentage calculations (including negative denominator cases), and alert thresholds are executed in deterministic Python.
-2. **Primary-Source Discipline:**
-   * Pull-side investment research is strictly restricted to primary company disclosures (Annual Reports, Quarterly Filings, and Concall Transcripts). Secondary broker notes, financial blogs, and ungrounded model knowledge are excluded.
-3. **Zero Paid Vector DB Requirement:**
-   * A structured SQLite storage schema manages document chunks, section headings, and page boundaries, delivering rapid keyword and metadata-filtered retrieval without requiring cloud vector databases.
-4. **Transparent Data Availability:**
-   * When market data or primary documents are absent, the system displays an explicit missing/stale status rather than fabricating estimates.
+**Interaction.** Cards swipe to save or dismiss, keyboard shortcuts work on desktop, verdict counts filter the promises, and thresholds preview live as they change.
 
----
+## What it doesn't do yet
 
-## 4. What Was Deliberately Excluded (Scope Discipline)
+- Screener.in supplies the multi-year financial tables, and it compiles filings rather than being one. Results alerts use the filing itself, and the fallback is labelled.
+- OCR reads scanned filings of up to 12 pages. A scanned annual report still can't be read.
+- Prices are end of day, so price and volume alerts describe the latest close.
+- There are no user accounts, so everyone using a link shares one portfolio and one set of thresholds.
+- Real-model testing so far covers filing headlines, results tables and bios, from Gemini on 20 real NSE filings. It found two checking bugs, both fixed. [Confirm before sending: run the research views with a real key and add what you found.]
 
-* **Stock Price Predictions / Target Prices:** FINN does not attempt to predict future stock prices or generate speculative investment buy/sell calls.
-* **Complex Multi-Agent Framework Overhead:** Instead of heavyweight third-party multi-agent wrappers (e.g., AutoGen, CrewAI), FINN uses a clean modular architecture with direct service boundaries.
-
----
-
-## 5. What Would Be Built Next
-
-1. **Automated PDF Tabular Parsing with OCR:** Enhancing the ingestion engine with table-transformer models for complex scanned Indian statutory filing formats.
-2. **PostgreSQL + pgvector Migration:** Transitioning from SQLite to PostgreSQL with vector indexing for hybrid lexical-semantic semantic search across 10-year annual report archives.
-3. **Direct Exchange Webhooks:** Connecting to real-time SEBI/NSE feed APIs for sub-minute announcement processing.
-
----
-
-## 6. Pre-Submission Verification Checklist
-
-- [x] Backend database initialized and seeded with 23 companies (18 demo portfolio + 5 research universe).
-- [x] All 28 automated tests passing (`python -m pytest backend/tests -v`).
-- [x] Frontend successfully built (`npm run build` completed with 0 errors).
-- [x] Single-command runner created (`python run_finn.py` / `start.bat`).
-- [x] Docker Compose and Dockerfiles created and verified.
-- [x] No committed API keys or secrets in repository.
-- [x] README.md, DEPLOYMENT.md, ARCHITECTURE.md, and TEST_REPORT.md finalized.
-
+With more time, I'd add per-user accounts, push notifications that work with the app closed, and evaluation sets to measure extraction accuracy over many filings.

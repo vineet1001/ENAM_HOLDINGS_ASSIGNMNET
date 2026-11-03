@@ -81,9 +81,12 @@ def test_alert_rules_and_evaluation(client):
     assert eval_res.status_code == 200
     assert "total_triggered" in eval_res.json()
 
-    events_res = client.get("/api/alerts/events")
+    events_res = client.get("/api/alerts/events?include_demo=true")
     assert events_res.status_code == 200
     assert events_res.json()["total"] >= 1
+    # Without asking for them, demo alerts stay out of the list.
+    live_events = client.get("/api/alerts/events").json()["events"]
+    assert all(not e["is_demo"] for e in live_events)
 
 
 def test_management_change_enrichment(client):

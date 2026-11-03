@@ -7,6 +7,21 @@
   --foreground: #f1f5f9;
   --panel: #111520;
   --border: #1e2433;
+  --scroll-track: #0a0d14;
+  --scroll-thumb: #1e2433;
+  --scroll-thumb-hover: #2d3748;
+  color-scheme: dark;
+}
+
+html.light {
+  --background: #f4f6fa;
+  --foreground: #0f172a;
+  --panel: #ffffff;
+  --border: #dfe4ec;
+  --scroll-track: #f4f6fa;
+  --scroll-thumb: #cbd3df;
+  --scroll-thumb-hover: #94a3b8;
+  color-scheme: light;
 }
 
 body {
@@ -23,14 +38,14 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0d14;
+  background: var(--scroll-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2433;
+  background: var(--scroll-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2d3748;
+  background: var(--scroll-thumb-hover);
 }
 
 /* Financial number tabular lining */
@@ -38,3 +53,134 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Horizontal chip rows scroll by touch without a visible bar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Threshold sliders */
+input[type='range'].finn-range {
+  accent-color: #3b82f6;
+  height: 24px;
+  width: 100%;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+/* ---------- Light theme ----------
+   The interface is written with fixed dark colours, so the light theme remaps exactly those classes here.
+   Generated from the classes in use; text keeps WCAG AA contrast on white, and solid buttons keep white text.
+   Chart colours are SVG attributes, which CSS overrides. */
+html.light body { background-color: var(--background); color: var(--foreground); }
+html.light :focus-visible { outline-color: #2563eb; }
+html.light .shadow-2xl, html.light .shadow-xl, html.light .shadow-lg { --tw-shadow-color: rgba(15, 23, 42, 0.12); }
+html.light .bg-\[\#0a0d14\] { background-color: #f4f6fa; }
+html.light .bg-\[\#0a0d14\]\/60 { background-color: rgba(244,246,250,0.6); }
+html.light .bg-\[\#0a0d14\]\/95 { background-color: rgba(244,246,250,0.95); }
+html.light .bg-\[\#0d111a\] { background-color: #ffffff; }
+html.light .bg-\[\#0d111a\]\/95 { background-color: rgba(255,255,255,0.95); }
+html.light .bg-\[\#111520\] { background-color: #ffffff; }
+html.light .bg-\[\#111520\]\/60 { background-color: rgba(255,255,255,0.6); }
+html.light .bg-\[\#111520\]\/70 { background-color: rgba(255,255,255,0.7); }
+html.light .bg-\[\#161c28\] { background-color: #eef1f6; }
+html.light .bg-\[\#161c28\]\/70 { background-color: rgba(238,241,246,0.7); }
+html.light .bg-\[\#1e2433\] { background-color: #e3e8ef; }
+html.light .bg-\[\#2a3449\] { background-color: #cbd3df; }
+html.light .border-\[\#1e2433\] { border-color: #dfe4ec; }
+html.light .border-\[\#1e2433\]\/60 { border-color: rgba(223,228,236,0.6); }
+html.light .border-\[\#1e2433\]\/70 { border-color: rgba(223,228,236,0.7); }
+html.light .border-\[\#2a3449\] { border-color: #c6cedb; }
+html.light .divide-\[\#1e2433\] > :not([hidden]) ~ :not([hidden]) { border-color: #dfe4ec; }
+html.light .hover\:bg-\[\#111520\]:hover { background-color: #ffffff; }
+html.light .hover\:bg-\[\#161c28\]:hover { background-color: #eef1f6; }
+html.light .hover\:bg-\[\#161c28\]\/50:hover { background-color: rgba(238,241,246,0.5); }
+html.light .hover\:bg-\[\#161c28\]\/60:hover { background-color: rgba(238,241,246,0.6); }
+html.light .hover\:bg-\[\#1a2030\]:hover { background-color: #e8ecf3; }
+html.light .hover\:bg-\[\#1e2433\]:hover { background-color: #e3e8ef; }
+html.light .hover\:border-\[\#2a3449\]:hover { border-color: #c6cedb; }
+html.light .ring-\[\#0a0d14\] { --tw-ring-color: #e5e9f0; }
+html.light .ring-\[\#111520\] { --tw-ring-color: #ffffff; }
+html.light .text-white { color: #0f172a; }
+html.light .hover\:text-white:hover { color: #0f172a; }
+html.light .text-slate-100 { color: #0f172a; }
+html.light .hover\:text-slate-100:hover { color: #0f172a; }
+html.light .text-slate-200 { color: #1e293b; }
+html.light .hover\:text-slate-200:hover { color: #1e293b; }
+html.light .text-slate-300 { color: #334155; }
+html.light .text-slate-400 { color: #475569; }
+html.light .text-slate-500 { color: #64748b; }
+html.light .text-blue-300 { color: #1d4ed8; }
+html.light .hover\:text-blue-300:hover { color: #1d4ed8; }
+html.light .text-blue-400 { color: #1d4ed8; }
+html.light .hover\:text-blue-400:hover { color: #1d4ed8; }
+html.light .group:hover .group-hover\:text-blue-400 { color: #1d4ed8; }
+html.light .text-emerald-300 { color: #047857; }
+html.light .hover\:text-emerald-300:hover { color: #047857; }
+html.light .text-emerald-400 { color: #047857; }
+html.light .text-rose-300 { color: #be123c; }
+html.light .text-rose-400 { color: #be123c; }
+html.light .hover\:text-rose-400:hover { color: #be123c; }
+html.light .text-amber-300 { color: #b45309; }
+html.light .hover\:text-amber-300:hover { color: #b45309; }
+html.light .text-amber-400 { color: #b45309; }
+html.light .text-cyan-300 { color: #0e7490; }
+html.light .text-cyan-400 { color: #0e7490; }
+html.light .text-indigo-400 { color: #4338ca; }
+html.light .text-purple-300 { color: #7e22ce; }
+html.light .text-purple-400 { color: #7e22ce; }
+html.light .text-teal-400 { color: #0f766e; }
+html.light .bg-blue-500.text-white, html.light .bg-blue-500.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-blue-600.text-white, html.light .bg-blue-600.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-blue-700.text-white, html.light .bg-blue-700.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-emerald-500.text-white, html.light .bg-emerald-500.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-emerald-600.text-white, html.light .bg-emerald-600.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-rose-500.text-white, html.light .bg-rose-500.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-rose-600.text-white, html.light .bg-rose-600.hover\:text-white:hover { color: #ffffff; }
+html.light .bg-slate-800 { background-color: #e2e8f0; }
+html.light .border-slate-700 { border-color: #cbd5e1; }
+html.light .hover\:border-slate-600:hover { border-color: #94a3b8; }
+html.light .hover\:border-slate-700:hover { border-color: #cbd5e1; }
+html.light .bg-black\/70 { background-color: rgba(15,23,42,0.45); }
+html.light svg [fill="#94a3b8" i] { fill: #64748b; }
+html.light svg [fill="#1e2433" i] { fill: #e2e8f0; }
+html.light svg [fill="#111520" i] { fill: #ffffff; }
+html.light svg [fill="#2a3449" i] { fill: #cbd5e1; }
+html.light svg [fill="#475569" i] { fill: #94a3b8; }
+html.light svg [fill="#cbd5e1" i] { fill: #475569; }
+html.light svg [fill="#e2e8f0" i] { fill: #334155; }
+html.light svg [fill="#60a5fa" i] { fill: #2563eb; }
+html.light svg [fill="#93c5fd" i] { fill: #1d4ed8; }
+html.light svg [fill="#fbbf24" i] { fill: #d97706; }
+html.light svg [fill="#0a0d14" i] { fill: #f4f6fa; }
+html.light svg [fill="#64748b" i] { fill: #94a3b8; }
+html.light svg [stroke="#94a3b8" i] { stroke: #64748b; }
+html.light svg [stroke="#1e2433" i] { stroke: #e2e8f0; }
+html.light svg [stroke="#111520" i] { stroke: #ffffff; }
+html.light svg [stroke="#2a3449" i] { stroke: #cbd5e1; }
+html.light svg [stroke="#475569" i] { stroke: #94a3b8; }
+html.light svg [stroke="#cbd5e1" i] { stroke: #475569; }
+html.light svg [stroke="#e2e8f0" i] { stroke: #334155; }
+html.light svg [stroke="#60a5fa" i] { stroke: #2563eb; }
+html.light svg [stroke="#93c5fd" i] { stroke: #1d4ed8; }
+html.light svg [stroke="#fbbf24" i] { stroke: #d97706; }
+html.light svg [stroke="#0a0d14" i] { stroke: #f4f6fa; }
+html.light svg [stroke="#64748b" i] { stroke: #94a3b8; }

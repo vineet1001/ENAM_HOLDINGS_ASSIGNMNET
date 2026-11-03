@@ -1,11 +1,27 @@
 """Alert evaluation engine - deterministic threshold-based checks."""
 import json
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Optional
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.active_portfolio import active_company_ids
+from app.services.alert_settings import stored_preferences
 from app.services.financial_calc import pct_change, volume_multiple
+
+MARKET_CLOSE = time(15, 30)
+
+
+async def _companies_with_override(session: AsyncSession, rule_type: str) -> set[int]:
+    """A stock with its own threshold is judged by that one, not the global one as well."""
+    from app.models.alert import AlertRule
+
+    rows = await session.execute(
+        select(AlertRule.company_id).where(
+            AlertRule.rule_type == rule_type, AlertRule.company_id.is_not(None), AlertRule.is_enabled == True
+        )
+    )
+    return {row[0] for row in rows.all()}
 
 
 async def evaluate_price_alerts(session: AsyncSession) -> list[dict]:
@@ -33,12 +49,9 @@ async def evaluate_price_alerts(session: AsyncSession) -> list[dict]:
         if rule.company_id:
             company_ids = [rule.company_id]
         else:
-            # Global rule - check all portfolio companies
-            from app.models.company import PortfolioMembership
-            pm_result = await session.execute(
-                select(PortfolioMembership.company_id)
-            )
-            company_ids = [r[0] for r in pm_result.all()]
+            # Global rule - check the portfolio being followed
+            overridden = await _companies_with_override(session, "price_movement")
+            company_ids = [c for c in await active_company_ids(session) if c not in overridden]
         
         threshold = rule.threshold_value or 3.0
         
@@ -46,7 +59,7 @@ async def evaluate_price_alerts(session: AsyncSession) -> list[dict]:
             # Get the two most recent price bars
             prices_result = await session.execute(
                 select(PriceBar)
-                .where(PriceBar.company_id == cid)
+                .where(PriceBar.company_id == cid, PriceBar.is_demo == False)
                 .order_by(PriceBar.date.desc())
                 .limit(2)
             )
@@ -91,7 +104,7 @@ async def evaluate_price_alerts(session: AsyncSession) -> list[dict]:
                 event = AlertEvent(
                     alert_rule_id=rule.id,
                     company_id=cid,
-                    triggered_at=datetime.utcnow(),
+                    triggered_at=datetime.combine(latest.date, MARKET_CLOSE),
                     trigger_value=dedup_key,
                     observed_value=f"{change_pct:+.2f}% on {latest.date}",
                     threshold_value=f"{threshold}% ({direction})",
@@ -120,8 +133,8 @@ async def evaluate_volume_alerts(session: AsyncSession) -> list[dict]:
     """
     from app.models.alert import AlertRule, AlertEvent
     from app.models.price import PriceBar
-    from app.models.company import Company, PortfolioMembership
-    
+    from app.models.company import Company
+
     triggered = []
     
     rules_result = await session.execute(
@@ -136,11 +149,9 @@ async def evaluate_volume_alerts(session: AsyncSession) -> list[dict]:
         if rule.company_id:
             company_ids = [rule.company_id]
         else:
-            pm_result = await session.execute(
-                select(PortfolioMembership.company_id)
-            )
-            company_ids = [r[0] for r in pm_result.all()]
-        
+            overridden = await _companies_with_override(session, "unusual_volume")
+            company_ids = [c for c in await active_company_ids(session) if c not in overridden]
+
         multiplier = rule.volume_multiplier or 2.0
         lookback = rule.volume_lookback_days or 20
         
@@ -148,7 +159,7 @@ async def evaluate_volume_alerts(session: AsyncSession) -> list[dict]:
             # Get most recent price bar
             latest_result = await session.execute(
                 select(PriceBar)
-                .where(PriceBar.company_id == cid)
+                .where(PriceBar.company_id == cid, PriceBar.is_demo == False)
                 .order_by(PriceBar.date.desc())
                 .limit(1)
             )
@@ -156,16 +167,21 @@ async def evaluate_volume_alerts(session: AsyncSession) -> list[dict]:
             if not latest or not latest.volume:
                 continue
             
-            # Get average volume over lookback period (excluding latest)
-            avg_result = await session.execute(
-                select(func.avg(PriceBar.volume))
+            # Average over the lookback sessions before the latest one.
+            # The limit has to be in a subquery: on the aggregate itself it wouldn't restrict the rows.
+            recent = (
+                select(PriceBar.volume)
                 .where(
                     PriceBar.company_id == cid,
-                    PriceBar.date < latest.date
+                    PriceBar.is_demo == False,
+                    PriceBar.date < latest.date,
+                    PriceBar.volume > 0
                 )
                 .order_by(PriceBar.date.desc())
                 .limit(lookback)
+                .subquery()
             )
+            avg_result = await session.execute(select(func.avg(recent.c.volume)))
             avg_vol = avg_result.scalar_one_or_none()
             
             if not avg_vol or avg_vol == 0:
@@ -192,7 +208,7 @@ async def evaluate_volume_alerts(session: AsyncSession) -> list[dict]:
                 event = AlertEvent(
                     alert_rule_id=rule.id,
                     company_id=cid,
-                    triggered_at=datetime.utcnow(),
+                    triggered_at=datetime.combine(latest.date, MARKET_CLOSE),
                     trigger_value=dedup_key,
                     observed_value=f"{vol_mult:.1f}x average on {latest.date} (vol={latest.volume:,})",
                     threshold_value=f"{multiplier}x average ({lookback}-day lookback)",
@@ -224,7 +240,8 @@ async def evaluate_announcement_alerts(session: AsyncSession) -> list[dict]:
     from app.models.company import Company
     
     triggered = []
-    
+    lookback_days = (await stored_preferences(session))["alert_lookback_days"]
+
     rules_result = await session.execute(
         select(AlertRule).where(
             AlertRule.rule_type == "material_announcement",
@@ -247,11 +264,17 @@ async def evaluate_announcement_alerts(session: AsyncSession) -> list[dict]:
         query = (
             select(Announcement)
             .join(AnnouncementClassification, Announcement.id == AnnouncementClassification.announcement_id)
-            .where(AnnouncementClassification.category.in_(categories))
+            .where(
+                AnnouncementClassification.category.in_(categories),
+                Announcement.is_demo == False,
+                Announcement.filing_date >= datetime.utcnow() - timedelta(days=lookback_days)
+            )
         )
-        
+
         if rule.company_id:
             query = query.where(Announcement.company_id == rule.company_id)
+        else:
+            query = query.where(Announcement.company_id.in_(await active_company_ids(session)))
         
         ann_result = await session.execute(query)
         announcements = ann_result.scalars().all()
@@ -271,7 +294,7 @@ async def evaluate_announcement_alerts(session: AsyncSession) -> list[dict]:
             event = AlertEvent(
                 alert_rule_id=rule.id,
                 company_id=ann.company_id,
-                triggered_at=datetime.utcnow(),
+                triggered_at=ann.filing_date,
                 trigger_value=dedup_key,
                 observed_value=f"'{ann.title}' classified as '{ann.category or 'unknown'}'",
                 threshold_value=f"Subscribed categories: {', '.join(categories)}",

@@ -32,7 +32,7 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """Create all tables."""
-    from app.models import company, price, announcement, alert, financial, document, research  # noqa: F401
+    from app.models import company, custom_portfolio, filing_insight, research_insight, price, announcement, alert, financial, document, research  # noqa: F401
     Base.metadata.create_all(sync_engine)
     sync_engine.dispose()
 

@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import {
   AlertRule,
   AlertEvent,
+  AiStatus,
   QuarterlyComparisonResponse,
   ManagementChangeEnrichment
 } from '@/types';
@@ -14,6 +15,7 @@ import {
   BellRing,
   Plus,
   Play,
+  SlidersHorizontal,
   CheckCircle2,
   Trash2,
   Edit2,
@@ -35,8 +37,25 @@ import {
 import { AlertRuleModal } from '@/components/AlertRuleModal';
 import { QuarterlyComparisonModal } from '@/components/QuarterlyComparisonModal';
 import { ExecutiveEnrichmentModal } from '@/components/ExecutiveEnrichmentModal';
+import { SwipeRow } from '@/components/SwipeRow';
+import { useQuickLook } from '@/components/QuickLook';
+import { useToast } from '@/components/Toast';
+import { AiHeadline, FilingFirstCut, FilingSummary } from '@/components/FilingAi';
+import { ALERTS_CHANGED_EVENT, googleFinanceUrl, nseQuoteUrl, screenerDocumentsUrl } from '@/lib/ui';
 
 export default function AlertsCentrePage() {
+  const toast = useToast();
+  const openQuickLook = useQuickLook();
+  const knownEventIds = useRef<Set<number>>(new Set());
+  const [freshEventIds, setFreshEventIds] = useState<Set<number>>(new Set());
+  const [expandedEventId, setExpandedEventId] = useState<number | null>(null);
+  const [confirmDeleteRuleId, setConfirmDeleteRuleId] = useState<number | null>(null);
+  const [confirmAckAll, setConfirmAckAll] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [showDemo, setShowDemo] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  // Read through a ref so the polling timer always uses the current setting.
+  const showDemoRef = useRef(false);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,12 +65,12 @@ export default function AlertsCentrePage() {
   // Real-time polling state
   const [autoSync, setAutoSync] = useState(true);
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(10);
-  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [isSilentSyncing, setIsSilentSyncing] = useState(false);
 
   // Filters
   const [filterTicker, setFilterTicker] = useState<string>('ALL');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'ACK'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'ACK'>('PENDING');
   const [filterRuleType, setFilterRuleType] = useState<string>('ALL');
 
   // Rule Creation / Editing Modal
@@ -69,15 +88,28 @@ export default function AlertsCentrePage() {
       if (!silent) setLoading(true);
       else setIsSilentSyncing(true);
 
-      const [rulesRes, eventsRes] = await Promise.all([
+      const [rulesRes, eventsRes, aiRes] = await Promise.all([
         api.getAlertRules(),
-        api.getAlertEvents({ limit: 100 }),
+        api.getAlertEvents({ limit: 100, include_demo: showDemoRef.current }),
+        api.getAiStatus(),
       ]);
+      setAiStatus(aiRes);
       setRules(rulesRes.rules);
       setEvents(eventsRes.events);
       setLastSyncTime(new Date());
-    } catch (err) {
-      console.error('Failed to load alerts data:', err);
+
+      // Anything unseen since the last sync gets called out instead of appearing silently.
+      const incoming = eventsRes.events.filter((e) => !knownEventIds.current.has(e.id));
+      if (knownEventIds.current.size > 0 && incoming.length > 0) {
+        setFreshEventIds(new Set(incoming.map((e) => e.id)));
+        toast({ message: `${incoming.length} new alert${incoming.length > 1 ? 's' : ''}: ${incoming.slice(0, 3).map((e) => e.company_ticker).join(', ')}` });
+        window.dispatchEvent(new Event(ALERTS_CHANGED_EVENT));
+      }
+      knownEventIds.current = new Set(eventsRes.events.map((e) => e.id));
+      setLoadError(null);
+    } catch (err: any) {
+      // A failed background sync keeps the last good list on screen.
+      setLoadError(err.message || 'Could not reach the FINN API');
     } finally {
       if (!silent) setLoading(false);
       setIsSilentSyncing(false);
@@ -86,7 +118,17 @@ export default function AlertsCentrePage() {
 
   useEffect(() => {
     loadAlerts(false);
+    // Show what's stored straight away, then fetch anything newer.
+    api.syncAlerts().then(() => loadAlerts(true)).catch(() => {});
   }, []);
+
+  const toggleDemo = () => {
+    const next = !showDemo;
+    showDemoRef.current = next;
+    knownEventIds.current = new Set();
+    setShowDemo(next);
+    loadAlerts(false);
+  };
 
   // Real-time polling effect
   useEffect(() => {
@@ -103,36 +145,44 @@ export default function AlertsCentrePage() {
     try {
       setEvaluating(true);
       setEvalResult(null);
-      const res = await api.evaluateAlerts();
+      const res = await api.syncAlerts();
       setEvalResult(
-        `Evaluation complete: ${res.total_triggered} new alerts triggered (${res.price_alerts_triggered} price, ${res.volume_alerts_triggered} volume, ${res.announcement_alerts_triggered} announcement).`
+        `Checked the exchanges and Yahoo Finance: ${res.total_triggered} new alerts (${res.price_alerts_triggered} price, ${res.volume_alerts_triggered} volume, ${res.announcement_alerts_triggered} filings).${res.errors.length ? ` ${res.errors.join(' ')}` : ''}`
       );
       await loadAlerts(false);
     } catch (err: any) {
-      alert(err.message || 'Alert evaluation failed');
+      toast({ message: err.message || 'Could not check for new alerts', tone: 'error' });
     } finally {
       setEvaluating(false);
     }
   };
 
   const handleToggleRule = async (rule: AlertRule) => {
+    const setEnabled = (is_enabled: boolean) =>
+      setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, is_enabled } : r)));
+    setEnabled(!rule.is_enabled);
     try {
       await api.updateAlertRule(rule.id, { is_enabled: !rule.is_enabled });
-      setRules((prev) =>
-        prev.map((r) => (r.id === rule.id ? { ...r, is_enabled: !r.is_enabled } : r))
-      );
-    } catch (err) {
-      console.error('Failed to toggle rule:', err);
+    } catch (err: any) {
+      setEnabled(rule.is_enabled);
+      toast({ message: err.message || 'Could not update the rule', tone: 'error' });
     }
   };
 
+  // Deleting a rule cascades to its events and can't be undone, so it takes a second tap.
   const handleDeleteRule = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this alert rule?')) return;
+    if (confirmDeleteRuleId !== id) {
+      setConfirmDeleteRuleId(id);
+      return;
+    }
+    setConfirmDeleteRuleId(null);
     try {
       await api.deleteAlertRule(id);
-      setRules((prev) => prev.filter((r) => r.id !== id));
-    } catch (err) {
-      console.error('Failed to delete rule:', err);
+      await loadAlerts(true);
+      window.dispatchEvent(new Event(ALERTS_CHANGED_EVENT));
+      toast({ message: 'Rule and its alert history deleted' });
+    } catch (err: any) {
+      toast({ message: err.message || 'Could not delete the rule', tone: 'error' });
     }
   };
 
@@ -142,9 +192,26 @@ export default function AlertsCentrePage() {
       setEvents((prev) =>
         prev.map((e) => (e.id === id ? { ...e, is_acknowledged: true, acknowledged_at: new Date().toISOString() } : e))
       );
-    } catch (err) {
-      console.error('Failed to acknowledge event:', err);
+      window.dispatchEvent(new Event(ALERTS_CHANGED_EVENT));
+    } catch (err: any) {
+      toast({ message: err.message || 'Could not acknowledge the alert', tone: 'error' });
     }
+  };
+
+  // Acknowledging is permanent on the backend, so the bulk action asks for a second tap.
+  const handleAcknowledgeVisible = async (pending: AlertEvent[]) => {
+    if (!confirmAckAll) {
+      setConfirmAckAll(true);
+      return;
+    }
+    setConfirmAckAll(false);
+    const results = await Promise.allSettled(pending.map((e) => api.acknowledgeAlert(e.id)));
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    await loadAlerts(true);
+    window.dispatchEvent(new Event(ALERTS_CHANGED_EVENT));
+    toast(failed
+      ? { message: `${failed} of ${pending.length} alerts could not be acknowledged`, tone: 'error' }
+      : { message: `Acknowledged ${pending.length} alert${pending.length > 1 ? 's' : ''}` });
   };
 
   const handleSaveRule = async (ruleData: Partial<AlertRule>) => {
@@ -161,9 +228,13 @@ export default function AlertsCentrePage() {
     try {
       setLoadingModal(true);
       const res = await api.getFinancials(ticker);
+      if (res.metrics.length === 0) {
+        toast({ message: `No quarterly numbers on file for ${ticker}`, tone: 'error' });
+        return;
+      }
       setQuarterlyModalData(res);
     } catch (err: any) {
-      alert(`Could not load quarterly financials for ${ticker}: ${err.message}`);
+      toast({ message: `Could not load quarterly financials for ${ticker}: ${err.message}`, tone: 'error' });
     } finally {
       setLoadingModal(false);
     }
@@ -176,7 +247,7 @@ export default function AlertsCentrePage() {
       const res = await api.getManagementEnrichment(announcementId);
       setEnrichmentModalData(res);
     } catch (err: any) {
-      alert(`Could not load executive background: ${err.message}`);
+      toast({ message: `Could not load executive background: ${err.message}`, tone: 'error' });
     } finally {
       setLoadingModal(false);
     }
@@ -192,10 +263,16 @@ export default function AlertsCentrePage() {
     if (filterRuleType !== 'ALL' && e.rule_type !== filterRuleType) return false;
     return true;
   });
+  const pendingVisible = filteredEvents.filter((e) => !e.is_acknowledged);
 
   return (
     <div className="flex-1 flex flex-col bg-[#0a0d14]">
-      <Header onRefresh={() => loadAlerts(false)} isRefreshing={loading} />
+      <Header
+        isDemo={showDemo}
+        dataFreshness={aiStatus?.last_sync ? `Last checked ${new Date(aiStatus.last_sync.at).toLocaleTimeString()}` : 'Checking...'}
+        onRefresh={() => loadAlerts(false)}
+        isRefreshing={loading}
+      />
 
       <main className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto w-full">
         {/* Top Header & Actions */}
@@ -214,12 +291,12 @@ export default function AlertsCentrePage() {
                   <span className={`relative inline-flex rounded-full h-2 w-2 ${autoSync ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
                 </span>
                 <span className="text-[10px] font-mono font-semibold text-emerald-400 uppercase tracking-wide">
-                  {autoSync ? 'Live Auto-Sync Active' : 'Polling Paused'}
+                  {autoSync ? 'Auto-Sync On' : 'Sync Paused'}
                 </span>
               </div>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Deterministic threshold evaluation across price moves, unusual volume multiples, and announcement subscriptions with real-time news & primary evidence linking.
+              You set the thresholds. Price moves, unusual volume and filing categories are checked against them deterministically.
             </p>
           </div>
 
@@ -234,7 +311,7 @@ export default function AlertsCentrePage() {
                 }`}
               >
                 {autoSync ? <Activity className="w-3 h-3 text-emerald-400 animate-pulse" /> : <Pause className="w-3 h-3" />}
-                <span>{autoSync ? 'Live' : 'Paused'}</span>
+                <span>{autoSync ? 'Syncing' : 'Paused'}</span>
               </button>
               
               <select
@@ -258,13 +335,21 @@ export default function AlertsCentrePage() {
               </button>
             </div>
 
+            <Link
+              href="/settings/alerts"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#2a3449] text-slate-200 hover:text-white text-xs font-medium transition-colors font-mono"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Thresholds
+            </Link>
+
             <button
               onClick={handleEvaluate}
               disabled={evaluating}
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors font-mono disabled:opacity-50"
             >
               <Play className={`w-3.5 h-3.5 ${evaluating ? 'animate-spin' : ''}`} />
-              {evaluating ? 'Evaluating...' : 'Evaluate Alerts'}
+              {evaluating ? 'Checking...' : 'Check now'}
             </button>
 
             <button
@@ -283,17 +368,44 @@ export default function AlertsCentrePage() {
         {/* Real-time Status Notice */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-400 font-mono bg-[#111520]/60 border border-[#1e2433] px-3.5 py-2 rounded-lg gap-2">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span className={`w-2 h-2 rounded-full shrink-0 ${loadError ? 'bg-rose-400' : 'bg-emerald-400'}`}></span>
             <span>
-              Real-time monitoring engine: Evaluates incoming exchange feeds, Yahoo Finance ticks, and classified corporate actions.
+              {loadError
+                ? `Sync failed, showing the last good list: ${loadError}`
+                : 'Real filings and end-of-day prices for your active portfolio, checked against your thresholds automatically.'}
             </span>
           </div>
           <div className="text-slate-400 flex items-center gap-1.5">
             <span>Last synchronized:</span>
-            <span className="text-slate-200">{lastSyncTime.toLocaleTimeString()}</span>
+            <span className="text-slate-200">{lastSyncTime ? lastSyncTime.toLocaleTimeString() : '—'}</span>
             {isSilentSyncing && <span className="text-blue-400 animate-pulse text-[10px]">(Syncing...)</span>}
           </div>
         </div>
+
+        {/* The filing reader's state, including exactly how to fix it */}
+        {aiStatus && !aiStatus.configured && (
+          <div className="p-3.5 rounded-lg bg-[#111520] border border-blue-500/30 text-xs space-y-1.5">
+            <p className="font-semibold text-slate-100">AI headlines are off</p>
+            <p className="text-slate-400 leading-relaxed">
+              Alerts below are real, but no model is reading the filings yet.{' '}
+              <Link href="/settings" className="text-blue-400 hover:text-blue-300 underline">
+                Add an API key in Settings
+              </Link>{' '}
+              to turn on headlines and summaries.
+            </p>
+          </div>
+        )}
+        {aiStatus?.configured && (aiStatus.last_error || aiStatus.paused_seconds > 0) && (
+          <div className="p-3.5 rounded-lg bg-[#111520] border border-amber-500/40 text-xs text-amber-300 font-mono">
+            The filing reader has a problem: {aiStatus.last_error || 'the free quota was reached'}.
+            {aiStatus.paused_seconds > 0 ? ` Retrying in ${aiStatus.paused_seconds}s.` : ''}
+          </div>
+        )}
+        {aiStatus?.configured && !aiStatus.last_error && aiStatus.filings_waiting > 0 && (
+          <p className="text-[11px] font-mono text-slate-400 animate-pulse">
+            {aiStatus.model} is reading {aiStatus.filings_waiting} filing{aiStatus.filings_waiting > 1 ? 's' : ''}...
+          </p>
+        )}
 
         {/* Evaluation Banner */}
         {evalResult && (
@@ -351,21 +463,35 @@ export default function AlertsCentrePage() {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#1e2433]/60">
+                  <div className="flex items-center justify-end gap-1 pt-1 border-t border-[#1e2433]/60">
+                    {confirmDeleteRuleId === r.id && (
+                      <button
+                        onClick={() => setConfirmDeleteRuleId(null)}
+                        className="mr-auto px-2 py-1.5 text-[11px] font-mono text-slate-400 hover:text-slate-200"
+                      >
+                        Keep rule
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setEditingRule(r);
                         setIsModalOpen(true);
                       }}
-                      className="p-1 rounded text-slate-400 hover:text-slate-200"
+                      aria-label={`Edit ${r.name}`}
+                      className="p-2 rounded text-slate-400 hover:text-slate-200"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleDeleteRule(r.id)}
-                      className="p-1 rounded text-slate-400 hover:text-rose-400"
+                      aria-label={confirmDeleteRuleId === r.id ? `Confirm delete ${r.name}` : `Delete ${r.name}`}
+                      className={`rounded transition-colors ${
+                        confirmDeleteRuleId === r.id
+                          ? 'px-2 py-1.5 text-[11px] font-mono font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/40'
+                          : 'p-2 text-slate-400 hover:text-rose-400'
+                      }`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      {confirmDeleteRuleId === r.id ? 'Delete rule + history' : <Trash2 className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
@@ -417,6 +543,25 @@ export default function AlertsCentrePage() {
                   <option value="unusual_volume">Unusual Volume</option>
                   <option value="price_movement">Price Movement</option>
                 </select>
+
+                <label className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-[#1e2433] bg-[#111520] text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={showDemo} onChange={toggleDemo} className="accent-blue-500" />
+                  Show demo alerts
+                </label>
+
+                {pendingVisible.length > 1 && (
+                  <button
+                    onClick={() => handleAcknowledgeVisible(pendingVisible)}
+                    onBlur={() => setConfirmAckAll(false)}
+                    className={`px-2 py-1 rounded border text-[11px] transition-colors ${
+                      confirmAckAll
+                        ? 'bg-blue-600 text-white border-blue-500 font-semibold'
+                        : 'bg-[#111520] text-slate-300 border-[#1e2433] hover:text-white'
+                    }`}
+                  >
+                    {confirmAckAll ? `Confirm: acknowledge ${pendingVisible.length}` : `Acknowledge ${pendingVisible.length}`}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -426,25 +571,35 @@ export default function AlertsCentrePage() {
               </div>
             ) : filteredEvents.length === 0 ? (
               <div className="p-8 rounded-xl bg-[#111520] border border-[#1e2433] text-center text-xs text-slate-400 font-mono">
-                No alerts match current filters. Click "Evaluate Alerts" to test rules against latest market data.
+                No alerts match these filters. A filing raises an alert for 7 days after it's filed, and rules run on your active portfolio.
               </div>
             ) : (
               <div className="space-y-4">
                 {filteredEvents.map((e) => (
-                  <div
+                  <SwipeRow
                     key={e.id}
+                    right={e.is_acknowledged ? undefined : {
+                      label: 'Acknowledge',
+                      className: 'bg-blue-500/20 text-blue-300',
+                      onTrigger: () => handleAcknowledgeEvent(e.id)
+                    }}
+                  >
+                  <div
                     className={`p-4 rounded-xl border transition-all ${
                       e.is_acknowledged
                         ? 'bg-[#111520]/70 border-[#1e2433]'
                         : 'bg-[#111520] border-amber-500/40 shadow-lg'
-                    }`}
+                    } ${freshEventIds.has(e.id) ? 'animate-flash' : ''}`}
                   >
                     {/* Top Alert Header */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#1e2433]/70">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-bold text-white font-mono px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30">
+                        <button
+                          onClick={() => openQuickLook(e.company_ticker)}
+                          className="text-xs font-bold text-white hover:text-blue-400 font-mono px-2 py-1 rounded bg-blue-500/10 border border-blue-500/30 transition-colors"
+                        >
                           {e.company_ticker}
-                        </span>
+                        </button>
                         <span className="text-xs font-semibold text-slate-200">{e.rule_name}</span>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#1e2433] text-slate-300 uppercase">
                           {e.rule_type.replace('_', ' ')}
@@ -464,11 +619,20 @@ export default function AlertsCentrePage() {
                       </div>
                     </div>
 
+                    {/* What the model read from the filing, kept apart from the exchange's own words */}
+                    {!e.is_demo && e.source_url && (
+                      <div className="mt-3">
+                        <AiHeadline insight={e.insight ?? null} aiEnabled={!!aiStatus?.configured} />
+                      </div>
+                    )}
+
                     {/* Alert Observation Box */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 my-3 p-3 rounded-lg bg-[#0a0d14] border border-[#1e2433] text-xs font-mono">
                       <div>
-                        <span className="text-slate-400 text-[10px] block font-sans">Observed Value:</span>
-                        <span className="text-amber-300 font-medium">{e.observed_value}</span>
+                        <span className="text-slate-400 text-[10px] block font-sans">
+                          {!e.is_demo && e.filing_title ? "Exchange's headline:" : 'Observed Value:'}
+                        </span>
+                        <span className="text-amber-300 font-medium">{!e.is_demo && e.filing_title ? e.filing_title : e.observed_value}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px] block font-sans">Configured Threshold:</span>
@@ -476,20 +640,44 @@ export default function AlertsCentrePage() {
                       </div>
                     </div>
 
-                    {/* SOURCE SITES & PRIMARY VERIFICATION SECTION */}
-                    <div className="mt-3 pt-3 border-t border-[#1e2433]/70 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300 font-mono">
-                          <Globe className="w-3.5 h-3.5 text-blue-400" />
-                          <span>SOURCE SITES & PRIMARY EVIDENCE</span>
-                        </div>
-                        <span className="text-[10px] text-slate-500 font-mono">Real-time deep links</span>
+                    {!e.is_demo && e.related_announcement_id && (
+                      <div className="mb-3">
+                        <FilingFirstCut
+                          category={e.related_announcement_category}
+                          insight={e.insight ?? null}
+                          ticker={e.company_ticker}
+                          pdfUrl={e.source_url}
+                          aiEnabled={!!aiStatus?.configured}
+                        />
                       </div>
+                    )}
 
-                      {/* Source Sites Badges */}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {/* Primary filing document link if present */}
-                        {e.source_url && (
+                    {!e.is_demo && e.source_url && e.related_announcement_id && (
+                      <FilingSummary
+                        announcementId={e.related_announcement_id}
+                        pdfUrl={e.source_url}
+                        insight={e.insight ?? null}
+                      />
+                    )}
+
+                    {/* SOURCE SITES & PRIMARY VERIFICATION SECTION */}
+                    <div className="mt-3 pt-1 border-t border-[#1e2433]/70 space-y-2.5">
+                      <button
+                        onClick={() => setExpandedEventId(expandedEventId === e.id ? null : e.id)}
+                        aria-expanded={expandedEventId === e.id}
+                        className="w-full flex items-center justify-between py-1.5 text-[11px] font-semibold text-slate-300 hover:text-white font-mono"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Evidence &amp; sources</span>
+                        </span>
+                        <ChevronDown className={`w-4 h-4 transition-transform ${expandedEventId === e.id ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {expandedEventId === e.id && (
+                      <div className="flex flex-wrap items-center gap-1.5 animate-fade-in">
+                        {/* Demo filings have placeholder URLs, so only real ones get a link */}
+                        {e.source_url && !e.is_demo && (
                           <a
                             href={e.source_url}
                             target="_blank"
@@ -516,7 +704,7 @@ export default function AlertsCentrePage() {
 
                         {/* Google Finance Intraday */}
                         <a
-                          href={`https://www.google.com/finance/quote/${e.company_ticker}:NSE`}
+                          href={googleFinanceUrl(e.company_ticker)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#161c28] hover:bg-[#1e2433] text-slate-200 border border-[#2a3449] text-[11px] font-mono transition-colors"
@@ -528,7 +716,7 @@ export default function AlertsCentrePage() {
 
                         {/* NSE Official Quote & Filings */}
                         <a
-                          href={`https://www.nseindia.com/get-quotes/equity?symbol=${e.company_ticker}`}
+                          href={nseQuoteUrl(e.company_ticker)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#161c28] hover:bg-[#1e2433] text-slate-200 border border-[#2a3449] text-[11px] font-mono transition-colors"
@@ -549,7 +737,20 @@ export default function AlertsCentrePage() {
                           <span>Moneycontrol Feed</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
+
+                        {/* Annual reports and concall transcripts */}
+                        <a
+                          href={screenerDocumentsUrl(e.company_ticker)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-mono transition-colors"
+                        >
+                          <FileText className="w-3 h-3 text-emerald-400" />
+                          <span>Annual Reports &amp; Concalls (Screener)</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
                       </div>
+                      )}
 
                       {/* In-App Deep Investigation Shortcuts */}
                       <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -563,7 +764,7 @@ export default function AlertsCentrePage() {
                         </Link>
 
                         {/* If results category -> open quarterly comparison */}
-                        {e.related_announcement_category === 'results' && (
+                        {e.is_demo && e.related_announcement_category === 'results' && (
                           <button
                             onClick={() => handleOpenQuarterly(e.company_ticker)}
                             disabled={loadingModal}
@@ -575,7 +776,7 @@ export default function AlertsCentrePage() {
                         )}
 
                         {/* If management change -> open executive profile */}
-                        {e.related_announcement_category === 'management_change' && e.related_announcement_id && (
+                        {e.is_demo && e.related_announcement_category === 'management_change' && e.related_announcement_id && (
                           <button
                             onClick={() => handleOpenExecutive(e.related_announcement_id!)}
                             disabled={loadingModal}
@@ -619,6 +820,7 @@ export default function AlertsCentrePage() {
                       )}
                     </div>
                   </div>
+                  </SwipeRow>
                 ))}
               </div>
             )}

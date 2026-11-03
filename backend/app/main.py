@@ -2,6 +2,7 @@
 FastAPI Application Entry Point.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 import os
@@ -11,11 +12,13 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import (
-    CORS_ORIGINS, DEMO_MODE, LLM_PROVIDER, LLM_API_KEY
+    CORS_ORIGINS, DEMO_MODE
 )
 from app.core.database import init_db, close_db, get_db, async_session_factory
 from app.demo_data.seed import seed_demo_data
-from app.api import portfolio, announcements, alerts, financials, research
+from app.api import portfolio, announcements, alerts, financials, research, live, portfolios, filings, settings
+from app.core.config import BACKGROUND_TASKS_ENABLED
+from app.services import documents, filing_ai, live_data, live_sync
 from app.models.company import Company, PortfolioMembership
 from app.models.price import PriceBar
 from app.models.announcement import Announcement
@@ -33,11 +36,30 @@ async def lifespan(app: FastAPI):
     # 2. Seed demo data if database is empty
     async with async_session_factory() as session:
         await seed_demo_data(session)
-    
+
+    # 3. Load the company lists in the background so the first search isn't the slow one
+    tasks = [asyncio.create_task(_warm_company_lists())]
+
+    # 4. Keep alerts live and have new filings read
+    if BACKGROUND_TASKS_ENABLED:
+        tasks.append(asyncio.create_task(live_sync.live_sync_loop()))
+        tasks.append(asyncio.create_task(live_sync.insight_worker_loop()))
+        tasks.append(asyncio.create_task(documents.ingest_worker_loop()))
+
     yield
+
+    for task in tasks:
+        task.cancel()
     
-    # 3. Clean shutdown
+    # 5. Clean shutdown
     await close_db()
+
+
+async def _warm_company_lists():
+    try:
+        await asyncio.to_thread(live_data.get_universe)
+    except live_data.LiveDataUnavailable:
+        pass  # Searches report the outage when they run, and retry then.
 
 
 app = FastAPI(
@@ -63,6 +85,10 @@ app.include_router(announcements.router)
 app.include_router(alerts.router)
 app.include_router(financials.router)
 app.include_router(research.router)
+app.include_router(live.router)
+app.include_router(portfolios.router)
+app.include_router(filings.router)
+app.include_router(settings.router)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["system"])
@@ -72,7 +98,7 @@ async def health_check():
         status="ok",
         version="1.0.0",
         demo_mode=DEMO_MODE,
-        llm_configured=bool(LLM_API_KEY and LLM_API_KEY.strip()),
+        llm_configured=filing_ai.ai_status()["configured"],
         database="connected",
         timestamp=datetime.utcnow()
     )

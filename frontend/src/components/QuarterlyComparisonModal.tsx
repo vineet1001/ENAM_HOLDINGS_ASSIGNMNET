@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { X, TrendingUp, TrendingDown, FileText, CheckCircle2 } from 'lucide-react';
+import { X, CheckCircle2 } from 'lucide-react';
 import { QuarterlyComparisonResponse } from '@/types';
+import { Sheet } from '@/components/Sheet';
 
 export function QuarterlyComparisonModal({
   data,
@@ -11,11 +12,11 @@ export function QuarterlyComparisonModal({
   data: QuarterlyComparisonResponse | null;
   onClose: () => void;
 }) {
-  if (!data) return null;
+  if (!data || data.metrics.length === 0) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-[#111520] border border-[#1e2433] rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6">
+    <Sheet open onClose={onClose} label={`Quarterly results for ${data.company_ticker}`}>
+      <div className="px-4 pb-6 md:p-6">
         {/* Header */}
         <div className="flex items-start justify-between pb-4 border-b border-[#1e2433]">
           <div>
@@ -31,6 +32,7 @@ export function QuarterlyComparisonModal({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close results"
             className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#1a2030] transition-colors"
           >
             <X className="w-5 h-5" />
@@ -38,7 +40,7 @@ export function QuarterlyComparisonModal({
         </div>
 
         {/* EBITDA Margin Highlights */}
-        <div className="grid grid-cols-3 gap-3 my-5">
+        <div className="grid grid-cols-3 gap-2 md:gap-3 my-5">
           <div className="p-3 rounded-lg bg-[#0a0d14] border border-[#1e2433]">
             <div className="text-[11px] text-slate-400 font-mono">Current ({data.current_period})</div>
             <div className="text-lg font-bold text-white font-mono mt-0.5">
@@ -123,7 +125,6 @@ export function QuarterlyComparisonModal({
           </p>
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 }
-

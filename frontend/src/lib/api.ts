@@ -10,8 +10,35 @@ import {
   ResearchResponse,
   SourceDocument,
   ManagementChangeEnrichment,
-  SystemHealth
+  SystemHealth,
+  LiveRange,
+  LivePortfolioHistory,
+  LiveFilingsResponse,
+  AiSettings,
+  AiStatus,
+  FilingInsight,
+  ListedCompany,
+  CustomPortfolio,
+  PortfoliosResponse,
+  DocumentState,
+  PortfolioDocuments,
+  DocumentSearchResult,
+  DocumentSummaryState,
+  AlertPreferences,
+  AlertPreviewCompany,
+  NotificationStatus,
+  OptimiseResult
 } from '@/types';
+
+export interface PortfolioInput {
+  name: string;
+  holdings: Array<{ ticker: string; weight: number }>;
+  activate?: boolean;
+}
+
+function adminHeaders(adminToken: string): Record<string, string> {
+  return adminToken ? { 'X-Finn-Admin-Token': adminToken } : {};
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -53,7 +80,7 @@ export const api = {
       method: 'DELETE',
     }),
   searchCompanies: (query: string) =>
-    fetchJson<{ results: Array<{ ticker: string; name: string; sector: string; in_portfolio: boolean }>; total: number }>(
+    fetchJson<{ results: Array<{ ticker: string; name: string; sector: string | null; exchange: string; in_portfolio: boolean }>; total: number; universe_available: boolean }>(
       `/companies/search?q=${encodeURIComponent(query)}`
     ),
   getCompany: (ticker: string) => fetchJson<Company>(`/companies/${ticker}`),
@@ -66,8 +93,9 @@ export const api = {
     ),
 
   // Announcements & Digest
-  getAnnouncements: (params?: { category?: string; company_ticker?: string; status?: string; limit?: number }) => {
+  getAnnouncements: (params?: { category?: string; company_ticker?: string; status?: string; limit?: number; is_demo?: boolean }) => {
     const q = new URLSearchParams();
+    if (params?.is_demo !== undefined) q.append('is_demo', String(params.is_demo));
     if (params?.category) q.append('category', params.category);
     if (params?.company_ticker) q.append('company_ticker', params.company_ticker);
     if (params?.status) q.append('status', params.status);
@@ -109,8 +137,17 @@ export const api = {
       '/alerts/evaluate',
       { method: 'POST' }
     ),
-  getAlertEvents: (params?: { acknowledged?: boolean; rule_type?: string; limit?: number }) => {
+  syncAlerts: () =>
+    fetchJson<{ total_triggered: number; price_alerts_triggered: number; volume_alerts_triggered: number; announcement_alerts_triggered: number; filings_added: number; errors: string[] }>(
+      '/alerts/sync',
+      { method: 'POST' }
+    ),
+  getAiStatus: () => fetchJson<AiStatus>('/ai/status'),
+  createFilingSummary: (announcementId: number) =>
+    fetchJson<FilingInsight>(`/filings/${announcementId}/summary`, { method: 'POST' }),
+  getAlertEvents: (params?: { acknowledged?: boolean; rule_type?: string; limit?: number; include_demo?: boolean }) => {
     const q = new URLSearchParams();
+    if (params?.include_demo) q.append('include_demo', 'true');
     if (params?.acknowledged !== undefined) q.append('acknowledged', String(params.acknowledged));
     if (params?.rule_type) q.append('rule_type', params.rule_type);
     if (params?.limit !== undefined) q.append('limit', params.limit.toString());
@@ -121,9 +158,83 @@ export const api = {
       method: 'PATCH',
     }),
 
+  // Live data (free sources: Yahoo Finance prices, NSE filings)
+  getLivePortfolioHistory: (range: LiveRange, ticker?: string) => {
+    const q = new URLSearchParams({ range });
+    if (ticker) q.append('ticker', ticker);
+    return fetchJson<LivePortfolioHistory>(`/live/portfolio-history?${q.toString()}`);
+  },
+  getLiveFilings: (ticker?: string) =>
+    fetchJson<LiveFilingsResponse>(`/live/filings${ticker ? `?ticker=${encodeURIComponent(ticker)}` : ''}`),
+  getLiveCompanyPrices: (ticker: string, days = 60) =>
+    fetchJson<PriceDataResponse>(`/live/companies/${encodeURIComponent(ticker)}/prices?days=${days}`),
+
+  // Every NSE and BSE listed company
+  searchListedCompanies: (query: string) =>
+    fetchJson<{ results: ListedCompany[]; total: number }>(`/universe/search?q=${encodeURIComponent(query)}`),
+  ensureCompany: (ticker: string) =>
+    fetchJson<{ ticker: string; name: string; exchange: string }>(
+      `/companies/${encodeURIComponent(ticker)}/ensure`,
+      { method: 'POST' }
+    ),
+
+  // AI platforms and keys
+  getAiSettings: (adminToken = '') =>
+    fetchJson<AiSettings>('/settings/ai', { headers: adminHeaders(adminToken) }),
+  saveAiSettings: (provider: string, body: { api_key?: string; model?: string; strong_model?: string; activate?: boolean }, adminToken = '') =>
+    fetchJson<AiSettings>(`/settings/ai/${provider}`, {
+      method: 'PUT',
+      headers: adminHeaders(adminToken),
+      body: JSON.stringify(body),
+    }),
+  removeAiKey: (provider: string, adminToken = '') =>
+    fetchJson<AiSettings>(`/settings/ai/${provider}/key`, { method: 'DELETE', headers: adminHeaders(adminToken) }),
+  testAiSettings: (provider: string, body: { api_key?: string; model?: string }, adminToken = '') =>
+    fetchJson<{ ok: boolean; message: string }>(`/settings/ai/${provider}/test`, {
+      method: 'POST',
+      headers: adminHeaders(adminToken),
+      body: JSON.stringify(body),
+    }),
+
+  // What counts as unusual, and where alerts are sent
+  getAlertPreferences: () => fetchJson<AlertPreferences>('/settings/alerts'),
+  saveAlertPreferences: (body: AlertPreferences) =>
+    fetchJson<{ new_alerts: number }>('/settings/alerts', { method: 'PUT', body: JSON.stringify(body) }),
+  getAlertPreview: (lookback: number) =>
+    fetchJson<{ companies: AlertPreviewCompany[] }>(`/settings/alerts/preview?lookback=${lookback}`),
+  getNotifications: () => fetchJson<NotificationStatus>('/settings/notifications'),
+  saveNotifications: (body: { bot_token?: string; chat_id?: string }) =>
+    fetchJson<NotificationStatus>('/settings/notifications', { method: 'PUT', body: JSON.stringify(body) }),
+  clearNotifications: () => fetchJson<NotificationStatus>('/settings/notifications', { method: 'DELETE' }),
+  testNotifications: () => fetchJson<{ ok: boolean; message: string }>('/settings/notifications/test', { method: 'POST' }),
+
+  optimisePortfolio: (body: { holdings: Array<{ ticker: string; weight: number }>; objective: string; max_weight: number; years: number }) =>
+    fetchJson<OptimiseResult>('/portfolios/optimise', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Custom portfolios
+  getPortfolios: () => fetchJson<PortfoliosResponse>('/portfolios'),
+  createPortfolio: (body: PortfolioInput) =>
+    fetchJson<CustomPortfolio>('/portfolios', { method: 'POST', body: JSON.stringify(body) }),
+  updatePortfolio: (id: number, body: PortfolioInput) =>
+    fetchJson<CustomPortfolio>(`/portfolios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deletePortfolio: (id: number) =>
+    fetchJson<{ message: string }>(`/portfolios/${id}`, { method: 'DELETE' }),
+  setActivePortfolio: (portfolioId: number | null) =>
+    fetchJson<{ active_id: number | null }>('/portfolios-active', {
+      method: 'PUT',
+      body: JSON.stringify({ portfolio_id: portfolioId }),
+    }),
+
   // Research & Documents
   getCompanyDocuments: (ticker: string) =>
-    fetchJson<{ documents: SourceDocument[]; total: number }>(`/companies/${ticker}/documents`),
+    fetchJson<{ documents: SourceDocument[]; total: number; state: DocumentState }>(`/companies/${ticker}/documents`),
+  fetchCompanyDocuments: (ticker: string) =>
+    fetchJson<{ state: DocumentState }>(`/companies/${ticker}/documents/fetch`, { method: 'POST' }),
+  getPortfolioDocuments: () => fetchJson<PortfolioDocuments>('/documents'),
+  searchDocument: (id: number, query: string) =>
+    fetchJson<{ results: DocumentSearchResult[]; total_pages: number | null }>(`/sources/${id}/pages?q=${encodeURIComponent(query)}`),
+  getDocumentSummary: (id: number) => fetchJson<DocumentSummaryState>(`/sources/${id}/summary`),
+  startDocumentSummary: (id: number) => fetchJson<DocumentSummaryState>(`/sources/${id}/summary`, { method: 'POST' }),
   getSourceDocument: (id: number) =>
     fetchJson<{ document: any; chunks: any[]; total_chunks: number }>(`/sources/${id}`),
   runResearch: (ticker: string, research_type: string, query?: string) =>
