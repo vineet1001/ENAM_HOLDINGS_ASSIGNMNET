@@ -26,6 +26,16 @@ The database, downloaded document text and saved keys all live in `./backend/dat
 
 These Docker files haven't been run yet, because the machine this was built on has no Docker.
 
+## Fastest: one container on Render
+
+`Dockerfile` and `render.yaml` at the root run the website and the backend in one container. Next.js serves the site and forwards `/api` to the backend inside it.
+
+1. Sign in at render.com with GitHub.
+2. Choose **New > Blueprint** and pick this repository.
+3. Paste a Gemini key when Render asks for `GEMINI_API_KEY`, then click **Apply**. The first build takes about 10 minutes.
+
+The free plan sleeps after 15 minutes with no visitors, so the first visit afterwards takes about a minute. It also has no disk: portfolios and AI answers saved on the hosted copy reset whenever the service restarts, and it starts again from the database in the repository. The free plan has 512 MB of memory. If reading large annual reports restarts the service, move to the Starter plan.
+
 ## Hosting it
 
 FINN is one long-running Python process with background jobs and a SQLite file, so the backend needs a host that keeps a process alive and has a persistent disk, such as Render or Railway. Serverless functions won't work for the backend.
