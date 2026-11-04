@@ -19,7 +19,7 @@ Some basic structure is made using a simple prompt
 This was stored on the readme file. 
 ## 1. Audit and first improvements
 
-**Prompt ** · *Pointed Claude Code at the brief, the reference PDF and the README of the work so far.*
+**Prompt** · *Pointed Claude Code at the brief, the reference PDF and the README of the work so far.*
 
 ```text
 @README.md  this file contain what we have done until now for the task @"1. ENAM_AI_Engineer_Build_Challenge_Main.pdf"  @"2. ENAM_AI_Engineer_Build_Challenge_Reference.pdf"  provided in these files. Ana;yse them and open run them. Also, can you make the UI more interactive
@@ -27,20 +27,20 @@ This was stored on the readme file.
 
 ## 2. Understanding what exists
 
-**Prompt **
+**Prompt**
 
 ```text
 Is itaccessing all the relevant documents like Income statemenst or other documents in the alters so that can i person see it or not ? How are we giving them
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 give me commands to run the app or tell me how can i run it
 ```
 
 
-**Prompt **
+**Prompt**
 
 ```text
 lets go page by page, what does the daily brienfing page shows
@@ -48,13 +48,13 @@ lets go page by page, what does the daily brienfing page shows
 
 ## 3. Live data and the portfolio
 
-**Prompt **
+**Prompt**
 
 ```text
 See,  we want this app to be live, so we want to use a free APIs. So in the daily briefing, palce a grpah which will show the overall portfolio progress how it is chaning which also has an option with dropdown containing the names of the Companies in the portfolio. Use live data for this using any free API which can provide us. ALso for the demo links, try to give more live links where people can see this. Use Free API of platform which can provide us that.
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 The headlines coming in the altert are these extratcted from the fillings or not ? From the search option we can search for any compnay listed in NSE, right ?
@@ -64,19 +64,19 @@ whqat does the start mark in the company stock are saying ?
 
 ## 4. The AI layer
 
-**Prompt **
+**Prompt**
 
 ```text
 Are we using any model here ?
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 All the alerts I am seeing a demo, try to have a model, which will extract the pdfs of the documents provided there and by ananlysising it, it will explain the things as headline and If someone wants a summary and add an option for it which one model will do it. Try to use a lightweight good model
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 Make a part in the settings where people can insert the API for the paltforms
@@ -84,7 +84,7 @@ Make a part in the settings where people can insert the API for the paltforms
 
 ## 5. Aligning with the brief and completing Push and Pull
 
-**Prompt ** · *Pasted the brief's sections on data sources, Push and Pull to check progress against it.*
+**Prompt** · *Pasted the brief's sections on data sources, Push and Pull to check progress against it.*
 
 Pasted text:
 
@@ -113,7 +113,7 @@ Then wrote:
 how much we have done this
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 We have a lot of time, the deadline is extended. Complete the whole PULL and PUSH side. TRy to give options to the user to fix their threshould. Create a seperate setting page so that they can add this and complete the whole project
@@ -121,13 +121,13 @@ We have a lot of time, the deadline is extended. Complete the whole PULL and PUS
 
 ## 6. Review, limitations and new methods
 
-**Prompt **
+**Prompt**
 
 ```text
 how much the project has been compleeted ?
 ```
 
-**Prompt ** · *Pasted a limitations list, then asked follow-up questions.*
+**Prompt** · *Pasted a limitations list, then asked follow-up questions.*
 
 Pasted text:
 
@@ -147,7 +147,7 @@ Then wrote:
 are only these limitations of our project or are there more ? If yes tell me and also tell me where we are using LLM. And I want to add something like strategies in Pull Section, where it will consists of some price prediction methods which will let the user see, whatis the expected price using some methods like using Portfolio maximization theorem or using some other statistical approaches. Only some common ones like via graph ananlysis. first telll me if it is possible or not and also for teh OCR, will it take too much of the space or not and if yes then how much and also for the 500 pages extraction, how much will it take.
 ```
 
-**Prompt ** · *Quoted Claude's recommendations back and approved them.*
+**Prompt** · *Quoted Claude's recommendations back and approved them.*
 
 ```text
 My recommendation:
@@ -161,25 +161,25 @@ Please do these and if possible try to solve the limitations
 
 ## 7. Running it on a phone
 
-**Prompt **
+**Prompt**
 
 ```text
 how to run this on phone
 ```
 
-**Prompt ** · *Sent with a screenshot of the Cloudflare tunnel running.*
+**Prompt** · *Sent with a screenshot of the Cloudflare tunnel running.*
 
 ```text
 this
 ```
 
-**Prompt **
+**Prompt**
 
 ```text
 The link is not working
 ```
 
-**Prompt ** · *Re-ran the tunnel command.*
+**Prompt** · *Re-ran the tunnel command.*
 
 ```text
 & "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://localhost:3000
@@ -187,7 +187,7 @@ The link is not working
 
 ## 8. Polish from phone testing
 
-**Prompt **
+**Prompt**
 
 ```text
 There is no menu baar in the side baar panel for teh daily breifing and other things.  Add summary part in sources and documents for all the documents provided in teh sources and documents secrtion. This should be like for each one we can get the summary of teh whole doicument. Also add dark and white theme so that user can check.  Please do all these changes
